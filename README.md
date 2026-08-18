@@ -98,6 +98,12 @@ chess-trainer/
 
 ---
 
+## 📄 License
+
+This project is licensed under the **[MIT License](./LICENSE)** © 2026 Chaz Bailey.
+
+---
+
 ## 📜 Third-Party Assets & Attribution
 
 This project uses chess piece artwork, audio themes, and libraries from the **[Lichess.org (Lila)](https://github.com/lichess-org/lila)** open-source ecosystem, **Stockfish**, and independent artists.
