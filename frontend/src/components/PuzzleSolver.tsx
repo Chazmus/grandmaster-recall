@@ -14,6 +14,7 @@ import {
   Swords,
   Loader2,
   Award,
+  Undo2,
 } from 'lucide-react';
 
 import { PuzzleWithReview } from '../types';
@@ -36,6 +37,18 @@ interface AlternativeContext {
   remainingMoves: string[];
 }
 
+interface BoardSnapshot {
+  fen: string;
+  lastMove?: [string, string];
+  stepIndex: number;
+  shapes: any[];
+  feedbackMessage: string | null;
+  status: 'solving' | 'correct' | 'failed' | 'showing_blunder' | 'showing_best' | 'sandbox';
+  isAlternativeSolution: boolean;
+  alternativeExplanation: string | null;
+  alternativeContext: AlternativeContext | null;
+}
+
 export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   puzzleData,
   onSolved,
@@ -50,6 +63,9 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   const [chessInstance, setChessInstance] = useState<Chess>(new Chess(puzzle.initial_fen));
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
   const [shapes, setShapes] = useState<any[]>([]);
+
+  // Move history stack for step-back / undo navigation
+  const [history, setHistory] = useState<BoardSnapshot[]>([]);
 
   // Solution moves (capped to max 3 plies for concise tactical focus)
   const [solutionMoves, setSolutionMoves] = useState<string[]>([]);
@@ -101,6 +117,19 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     setAlternativeContext(null);
     setUserSolvedFen(null);
     setUserSolvedLastMove(undefined);
+
+    const initialSnapshot: BoardSnapshot = {
+      fen: puzzle.initial_fen,
+      lastMove: undefined,
+      stepIndex: 0,
+      shapes: [],
+      feedbackMessage: null,
+      status: 'solving',
+      isAlternativeSolution: false,
+      alternativeExplanation: null,
+      alternativeContext: null,
+    };
+    setHistory([initialSnapshot]);
   }, [puzzle.id, puzzle.initial_fen, puzzle.continuation_uci, puzzle.best_move_uci]);
 
   const parseTags = (): string[] => {
@@ -143,6 +172,19 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
 
     if (!moveResult) return;
 
+    // Capture pre-move snapshot to history
+    const preMoveSnapshot: BoardSnapshot = {
+      fen: currentFen,
+      lastMove,
+      stepIndex: currentStep,
+      shapes,
+      feedbackMessage,
+      status,
+      isAlternativeSolution,
+      alternativeExplanation,
+      alternativeContext,
+    };
+
     setIsValidatingMove(true);
 
     try {
@@ -155,6 +197,8 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       });
 
       if (valRes.is_valid) {
+        setHistory((prev) => [...prev, preMoveSnapshot]);
+
         if (!valRes.is_best) {
           setIsAlternativeSolution(true);
           if (valRes.explanation) {
@@ -244,6 +288,19 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
                   setUserSolvedLastMove([oppFrom, oppTo]);
                   setCurrentStep(nextStep + 1);
 
+                  const afterOppSnapshot: BoardSnapshot = {
+                    fen: afterOppFen,
+                    lastMove: [oppFrom, oppTo],
+                    stepIndex: nextStep + 1,
+                    shapes: [],
+                    feedbackMessage: valRes.explanation || null,
+                    status: nextStep + 1 >= maxPlies ? 'correct' : 'solving',
+                    isAlternativeSolution: !valRes.is_best,
+                    alternativeExplanation: valRes.explanation || null,
+                    alternativeContext,
+                  };
+                  setHistory((prev) => [...prev, afterOppSnapshot]);
+
                   if (nextStep + 1 >= maxPlies) {
                     finishPuzzleSuccess(valRes.is_best, valRes.explanation);
                   }
@@ -308,6 +365,21 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     } catch {
       return;
     }
+
+    setHistory((prev) => [
+      ...prev,
+      {
+        fen: currentFen,
+        lastMove,
+        stepIndex: currentStep,
+        shapes,
+        feedbackMessage,
+        status,
+        isAlternativeSolution,
+        alternativeExplanation,
+        alternativeContext,
+      },
+    ]);
 
     const newFen = testChess.fen();
     setCurrentFen(newFen);
@@ -587,6 +659,69 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     setAlternativeContext(null);
     setUserSolvedFen(null);
     setUserSolvedLastMove(undefined);
+
+    const initialSnapshot: BoardSnapshot = {
+      fen: puzzle.initial_fen,
+      lastMove: undefined,
+      stepIndex: 0,
+      shapes: [],
+      feedbackMessage: null,
+      status: 'solving',
+      isAlternativeSolution: false,
+      alternativeExplanation: null,
+      alternativeContext: null,
+    };
+    setHistory([initialSnapshot]);
+  };
+
+  const canStepBack =
+    currentStep > 0 ||
+    history.length > 1 ||
+    status === 'sandbox' ||
+    status === 'showing_best' ||
+    status === 'showing_blunder' ||
+    status === 'correct';
+
+  const handleStepBack = () => {
+    if (status === 'showing_best' || status === 'showing_blunder') {
+      if (userSolvedFen) {
+        handleRestoreUserSolution();
+      } else {
+        handleResetPuzzle();
+      }
+      return;
+    }
+
+    if (history.length <= 1) {
+      handleResetPuzzle();
+      return;
+    }
+
+    const nextHistory = [...history];
+    nextHistory.pop(); // remove current snapshot
+    const targetState = nextHistory[nextHistory.length - 1];
+
+    if (!targetState) {
+      handleResetPuzzle();
+      return;
+    }
+
+    setHistory(nextHistory);
+    setCurrentFen(targetState.fen);
+    setChessInstance(new Chess(targetState.fen));
+    setLastMove(targetState.lastMove);
+    setCurrentStep(targetState.stepIndex);
+    setShapes(targetState.shapes);
+    setFeedbackMessage(
+      targetState.stepIndex === 0
+        ? null
+        : targetState.feedbackMessage || `Stepped back to Ply ${targetState.stepIndex}.`
+    );
+    setStatus(targetState.status === 'correct' ? 'solving' : targetState.status);
+    setIsAlternativeSolution(targetState.isAlternativeSolution);
+    setAlternativeExplanation(targetState.alternativeExplanation);
+    setAlternativeContext(targetState.alternativeContext);
+    sounds.play('move');
   };
 
   const handleStartSandbox = () => {
@@ -655,6 +790,17 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
             <span className="text-slate-500">({puzzle.player_color})</span>
           </div>
           <div className="flex items-center gap-2">
+            {canStepBack && (
+              <button
+                onClick={handleStepBack}
+                disabled={isValidatingMove}
+                title="Go back to previous move / retry"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-medium border border-slate-700 transition-all active:scale-95 shadow-sm"
+              >
+                <Undo2 className="w-3 h-3 text-blue-400" />
+                <span>Undo</span>
+              </button>
+            )}
             {parseTags().map((tag, i) => (
               <span key={i} className="px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 text-[11px]">
                 {tag}
@@ -734,6 +880,19 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
 
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800/80">
+            {/* Step Back / Undo Button */}
+            {canStepBack && (
+              <button
+                onClick={handleStepBack}
+                disabled={isValidatingMove}
+                title="Step backwards to previous move / ply"
+                className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700/60 shadow-sm"
+              >
+                <Undo2 className="w-3.5 h-3.5 text-blue-400" />
+                <span>{currentStep > 0 ? `Step Back (Ply ${currentStep})` : 'Step Back'}</span>
+              </button>
+            )}
+
             <button
               onClick={handleShowHint}
               disabled={status === 'correct' || status === 'showing_best' || hintLevel >= 3}

@@ -101,4 +101,18 @@ describe('PuzzleSolver Component', () => {
 
     expect(screen.queryByText(/See Best Move/i)).not.toBeInTheDocument();
   });
+
+  it('renders Step Back / Undo button when appropriate', () => {
+    render(
+      <PuzzleSolver
+        puzzleData={mockPuzzle}
+        onSolved={vi.fn()}
+        userId={1}
+      />
+    );
+
+    // At ply 0 with no moves, Undo is not active
+    expect(screen.queryByText('Undo')).not.toBeInTheDocument();
+  });
 });
+
