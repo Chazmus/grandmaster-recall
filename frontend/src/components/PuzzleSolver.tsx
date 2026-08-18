@@ -161,28 +161,42 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
             setAlternativeExplanation(valRes.explanation);
           }
 
-          // Compute the SAN for the expected best move at this specific step
-          let stepBestSan = expectedMoveUci;
-          try {
-            const stepChess = new Chess(currentFen);
-            const sFrom = expectedMoveUci.slice(0, 2) as Square;
-            const sTo = expectedMoveUci.slice(2, 4) as Square;
-            const sProm = expectedMoveUci.length > 4 ? expectedMoveUci[4] : undefined;
-            const sRes = stepChess.move({ from: sFrom, to: sTo, promotion: sProm });
-            if (sRes) {
-              stepBestSan = sRes.san;
+          // Use the actual best move for this position returned by the engine, or solutionMoves[currentStep]
+          const targetBestUci =
+            valRes.best_move_uci ||
+            solutionMoves[currentStep] ||
+            (currentStep === 0 ? puzzle.best_move_uci : '');
+
+          let stepBestSan = targetBestUci;
+          if (targetBestUci && targetBestUci.length >= 4) {
+            try {
+              const stepChess = new Chess(currentFen);
+              const sFrom = targetBestUci.slice(0, 2) as Square;
+              const sTo = targetBestUci.slice(2, 4) as Square;
+              const sProm = targetBestUci.length > 4 ? targetBestUci[4] : undefined;
+              const sRes = stepChess.move({ from: sFrom, to: sTo, promotion: sProm });
+              if (sRes) {
+                stepBestSan = sRes.san;
+              }
+            } catch {
+              // fallback
             }
-          } catch {
-            // fallback to UCI
           }
 
-          setAlternativeContext({
-            fenBefore: currentFen,
-            expectedUci: expectedMoveUci,
-            bestSan: stepBestSan,
-            stepIndex: currentStep,
-            remainingMoves: solutionMoves.slice(currentStep),
-          });
+          const continuationLine =
+            valRes.continuation_uci && valRes.continuation_uci.length > 0
+              ? valRes.continuation_uci
+              : solutionMoves.slice(currentStep);
+
+          if (targetBestUci) {
+            setAlternativeContext({
+              fenBefore: currentFen,
+              expectedUci: targetBestUci,
+              bestSan: stepBestSan,
+              stepIndex: currentStep,
+              remainingMoves: continuationLine,
+            });
+          }
         }
 
         const newFen = testChess.fen();
@@ -208,31 +222,35 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
               const oppTo = oppMoveUci.slice(2, 4);
               const oppProm = oppMoveUci.length > 4 ? oppMoveUci[4] : undefined;
 
-              const oppChess = new Chess(newFen);
-              const oppMoveResult = oppChess.move({
-                from: oppFrom as Square,
-                to: oppTo as Square,
-                promotion: oppProm,
-              });
+              try {
+                const oppChess = new Chess(newFen);
+                const oppMoveResult = oppChess.move({
+                  from: oppFrom as Square,
+                  to: oppTo as Square,
+                  promotion: oppProm,
+                });
 
-              if (oppMoveResult) {
-                if (oppMoveResult.captured) {
-                  sounds.play('capture');
+                if (oppMoveResult) {
+                  if (oppMoveResult.captured) {
+                    sounds.play('capture');
+                  } else {
+                    sounds.play('move');
+                  }
+                  const afterOppFen = oppChess.fen();
+                  setCurrentFen(afterOppFen);
+                  setChessInstance(oppChess);
+                  setLastMove([oppFrom, oppTo]);
+                  setUserSolvedFen(afterOppFen);
+                  setUserSolvedLastMove([oppFrom, oppTo]);
+                  setCurrentStep(nextStep + 1);
+
+                  if (nextStep + 1 >= maxPlies) {
+                    finishPuzzleSuccess(valRes.is_best, valRes.explanation);
+                  }
                 } else {
-                  sounds.play('move');
-                }
-                const afterOppFen = oppChess.fen();
-                setCurrentFen(afterOppFen);
-                setChessInstance(oppChess);
-                setLastMove([oppFrom, oppTo]);
-                setUserSolvedFen(afterOppFen);
-                setUserSolvedLastMove([oppFrom, oppTo]);
-                setCurrentStep(nextStep + 1);
-
-                if (nextStep + 1 >= maxPlies) {
                   finishPuzzleSuccess(valRes.is_best, valRes.explanation);
                 }
-              } else {
+              } catch {
                 finishPuzzleSuccess(valRes.is_best, valRes.explanation);
               }
             } else {
@@ -280,12 +298,16 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       actualPromotion = 'q';
     }
 
-    const res = testChess.move({
-      from: orig as Square,
-      to: dest as Square,
-      promotion: actualPromotion,
-    });
-    if (!res) return;
+    try {
+      const res = testChess.move({
+        from: orig as Square,
+        to: dest as Square,
+        promotion: actualPromotion,
+      });
+      if (!res) return;
+    } catch {
+      return;
+    }
 
     const newFen = testChess.fen();
     setCurrentFen(newFen);
@@ -301,22 +323,26 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
           const oppTo = evalRes.best_move.slice(2, 4);
           const oppProm = evalRes.best_move.length > 4 ? evalRes.best_move[4] : undefined;
 
-          const oppChess = new Chess(newFen);
-          const oppMoveResult = oppChess.move({
-            from: oppFrom as Square,
-            to: oppTo as Square,
-            promotion: oppProm,
-          });
+          try {
+            const oppChess = new Chess(newFen);
+            const oppMoveResult = oppChess.move({
+              from: oppFrom as Square,
+              to: oppTo as Square,
+              promotion: oppProm,
+            });
 
-          if (oppMoveResult) {
-            if (oppMoveResult.captured) {
-              sounds.play('capture');
-            } else {
-              sounds.play('move');
+            if (oppMoveResult) {
+              if (oppMoveResult.captured) {
+                sounds.play('capture');
+              } else {
+                sounds.play('move');
+              }
+              setCurrentFen(oppChess.fen());
+              setChessInstance(oppChess);
+              setLastMove([oppFrom, oppTo]);
             }
-            setCurrentFen(oppChess.fen());
-            setChessInstance(oppChess);
-            setLastMove([oppFrom, oppTo]);
+          } catch {
+            // ignore
           }
         }, 400);
       }
@@ -370,11 +396,44 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     const bestTo = context.expectedUci.slice(2, 4);
     const bestProm = context.expectedUci.length > 4 ? context.expectedUci[4] : undefined;
 
-    demoChess.move({
-      from: bestFrom as Square,
-      to: bestTo as Square,
-      promotion: bestProm,
-    });
+    let moveSuccess = false;
+    try {
+      const res = demoChess.move({
+        from: bestFrom as Square,
+        to: bestTo as Square,
+        promotion: bestProm,
+      });
+      if (res) {
+        moveSuccess = true;
+      }
+    } catch (err) {
+      console.warn('Could not make move in demo position:', context.expectedUci, err);
+    }
+
+    if (!moveSuccess) {
+      // Fallback to initial position if context had move mismatch
+      try {
+        const fallbackChess = new Chess(puzzle.initial_fen);
+        const fbFrom = puzzle.best_move_uci.slice(0, 2);
+        const fbTo = puzzle.best_move_uci.slice(2, 4);
+        const fbProm = puzzle.best_move_uci.length > 4 ? puzzle.best_move_uci[4] : undefined;
+        const fbRes = fallbackChess.move({
+          from: fbFrom as Square,
+          to: fbTo as Square,
+          promotion: fbProm,
+        });
+        if (fbRes) {
+          setCurrentFen(fallbackChess.fen());
+          setLastMove([fbFrom, fbTo]);
+          setShapes([{ orig: fbFrom, dest: fbTo, brush: 'green' }]);
+          sounds.play('move');
+          setFeedbackMessage(`Stockfish top choice: ${puzzle.best_move_san} (${puzzle.best_move_uci})`);
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
 
     setCurrentFen(demoChess.fen());
     setLastMove([bestFrom, bestTo]);
@@ -389,31 +448,33 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       setTimeout(() => {
         try {
           const oppReplyUci = remaining[1];
-          const oFrom = oppReplyUci.slice(0, 2);
-          const oTo = oppReplyUci.slice(2, 4);
-          const oProm = oppReplyUci.length > 4 ? oppReplyUci[4] : undefined;
+          if (oppReplyUci && oppReplyUci.length >= 4) {
+            const oFrom = oppReplyUci.slice(0, 2);
+            const oTo = oppReplyUci.slice(2, 4);
+            const oProm = oppReplyUci.length > 4 ? oppReplyUci[4] : undefined;
 
-          const oppRes = demoChess.move({
-            from: oFrom as Square,
-            to: oTo as Square,
-            promotion: oProm,
-          });
+            const oppRes = demoChess.move({
+              from: oFrom as Square,
+              to: oTo as Square,
+              promotion: oProm,
+            });
 
-          if (oppRes) {
-            setCurrentFen(demoChess.fen());
-            setLastMove([oFrom, oTo]);
-            setShapes([
-              { orig: bestFrom, dest: bestTo, brush: 'green' },
-              { orig: oFrom, dest: oTo, brush: 'yellow' },
-            ]);
-            if (oppRes.captured) {
-              sounds.play('capture');
-            } else {
-              sounds.play('move');
+            if (oppRes) {
+              setCurrentFen(demoChess.fen());
+              setLastMove([oFrom, oTo]);
+              setShapes([
+                { orig: bestFrom, dest: bestTo, brush: 'green' },
+                { orig: oFrom, dest: oTo, brush: 'yellow' },
+              ]);
+              if (oppRes.captured) {
+                sounds.play('capture');
+              } else {
+                sounds.play('move');
+              }
+              setFeedbackMessage(
+                `Stockfish line: ${context.bestSan} ... (best continuation)`
+              );
             }
-            setFeedbackMessage(
-              `Stockfish line: ${context.bestSan} ... (best continuation)`
-            );
           }
         } catch {
           // ignore
@@ -463,11 +524,21 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     const blunderTo = puzzle.blunder_move_uci.slice(2, 4);
     const blunderProm = puzzle.blunder_move_uci.length > 4 ? puzzle.blunder_move_uci[4] : undefined;
 
-    demoChess.move({
-      from: blunderFrom as Square,
-      to: blunderTo as Square,
-      promotion: blunderProm,
-    });
+    try {
+      demoChess.move({
+        from: blunderFrom as Square,
+        to: blunderTo as Square,
+        promotion: blunderProm,
+      });
+
+      setCurrentFen(demoChess.fen());
+      setLastMove([blunderFrom, blunderTo]);
+      setShapes([{ orig: blunderFrom, dest: blunderTo, brush: 'red' }]);
+      sounds.play('move');
+      setFeedbackMessage(`In the game, you played ${puzzle.blunder_move_san}.`);
+    } catch {
+      return;
+    }
 
     setCurrentFen(demoChess.fen());
     setLastMove([blunderFrom, blunderTo]);

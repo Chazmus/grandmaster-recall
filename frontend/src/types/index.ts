@@ -103,6 +103,8 @@ export interface ValidateMoveResponse {
   eval_diff_cp: number;
   explanation: string;
   opponent_reply_uci: string | null;
+  best_move_uci?: string | null;
+  continuation_uci?: string[] | null;
 }
 
 export interface MoveEval {

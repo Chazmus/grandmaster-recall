@@ -152,6 +152,8 @@ pub struct ValidateMoveResponse {
     pub eval_diff_cp: i32,
     pub explanation: String,
     pub opponent_reply_uci: Option<String>,
+    pub best_move_uci: Option<String>,
+    pub continuation_uci: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

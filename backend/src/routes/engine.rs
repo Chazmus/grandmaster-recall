@@ -77,6 +77,8 @@ pub async fn validate_move(
             eval_diff_cp: 0,
             explanation: "Brilliant! Best move.".to_string(),
             opponent_reply_uci: opponent_reply,
+            best_move_uci: Some(expected_best),
+            continuation_uci: None,
         }));
     }
 
@@ -121,6 +123,16 @@ pub async fn validate_move(
         None
     };
 
+    let best_uci = if !eval_before_res.best_move.is_empty() {
+        Some(eval_before_res.best_move.clone())
+    } else if !expected_best.is_empty() {
+        Some(expected_best)
+    } else {
+        None
+    };
+
+    let continuation = eval_before_res.lines.first().map(|l| l.pv.clone());
+
     let explanation = if is_valid {
         if eval_diff <= 15 {
             "Excellent move! Equally strong alternative.".to_string()
@@ -137,5 +149,7 @@ pub async fn validate_move(
         eval_diff_cp: eval_diff,
         explanation,
         opponent_reply_uci: opponent_reply,
+        best_move_uci: best_uci,
+        continuation_uci: continuation,
     }))
 }
