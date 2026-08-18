@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #0b0f19;
+    color: #f1f5f9;
+    overflow-x: hidden;
+  }
+}
+
+/* Chessground Base Styles */
+.cg-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+}
+
+cg-container {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: block;
+  top: 0;
+}
+
+cg-board {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  line-height: 0;
+  background-size: cover;
+  background-color: #3b4252;
+}
+
+/* Board Theme: Modern Dark Wood / Slate */
+.wood cg-board, .cg-theme-default cg-board {
+  background-color: #2e3440;
+  background-image: 
+    linear-gradient(45deg, #434c5e 25%, transparent 25%), 
+    linear-gradient(-45deg, #434c5e 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #434c5e 75%), 
+    linear-gradient(-45deg, transparent 75%, #434c5e 75%);
+  background-size: 25% 25%;
+  background-position: 0 0, 0 12.5%, 12.5% -12.5%, -12.5% 0px;
+}
+
+/* Authentic Lichess Style Board Colors (Emerald/Slate) */
+cg-board {
+  background: conic-gradient(#303846 90deg, #515e72 90deg 180deg, #303846 180deg 270deg, #515e72 270deg) top left / 25% 25% repeat !important;
+}
+
+/* Highlighting Moves */
+square.move-dest {
+  background: radial-gradient(rgba(34, 197, 94, 0.6) 22%, rgba(0, 0, 0, 0) 24%);
+  pointer-events: none;
+}
+
+square.move-dest.occupied {
+  background: radial-gradient(transparent 0%, transparent 80%, rgba(34, 197, 94, 0.6) 80%);
+}
+
+square.last-move {
+  background-color: rgba(234, 179, 8, 0.35) !important;
+}
+
+square.selected {
+  background-color: rgba(59, 130, 246, 0.45) !important;
+}
+
+square.blunder-square {
+  background-color: rgba(239, 68, 68, 0.5) !important;
+  animation: pulse-blunder 1.5s infinite ease-in-out;
+}
+
+square.best-move-square {
+  background-color: rgba(16, 185, 129, 0.5) !important;
+}
+
+@keyframes pulse-blunder {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.3; }
+}
+
+/* Chess Pieces (Cburnett standard high-res SVG) */
+piece {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12.5%;
+  height: 12.5%;
+  background-size: cover;
+  z-index: 2;
+  will-change: transform;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+piece.dragging {
+  cursor: grabbing;
+  z-index: 10;
+  transform: scale(1.15);
+  filter: drop-shadow(0 10px 15px rgba(0,0,0,0.6));
+}
+
+piece.pawn.white { background-image: url('/piece/cburnett/wP.svg'); }
+piece.bishop.white { background-image: url('/piece/cburnett/wB.svg'); }
+piece.knight.white { background-image: url('/piece/cburnett/wN.svg'); }
+piece.rook.white { background-image: url('/piece/cburnett/wR.svg'); }
+piece.queen.white { background-image: url('/piece/cburnett/wQ.svg'); }
+piece.king.white { background-image: url('/piece/cburnett/wK.svg'); }
+
+piece.pawn.black { background-image: url('/piece/cburnett/bP.svg'); }
+piece.bishop.black { background-image: url('/piece/cburnett/bB.svg'); }
+piece.knight.black { background-image: url('/piece/cburnett/bN.svg'); }
+piece.rook.black { background-image: url('/piece/cburnett/bR.svg'); }
+piece.queen.black { background-image: url('/piece/cburnett/bQ.svg'); }
+piece.king.black { background-image: url('/piece/cburnett/bK.svg'); }
+
+/* Coordinates */
+coords {
+  position: absolute;
+  display: flex;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+coords.ranks {
+  right: 4px;
+  top: 0;
+  flex-direction: column;
+  height: 100%;
+  width: 14px;
+}
+
+coords.files {
+  bottom: 2px;
+  left: 0;
+  flex-direction: row;
+  width: 100%;
+  height: 14px;
+}
+
+coords coord {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+}
+
+/* SVG Shapes / Arrows */
+svg.cg-shapes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}

@@ -1,0 +1,24 @@
+[package]
+name = "chess-trainer-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["json", "macros"] }
+tokio = { version = "1", features = ["full", "process"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
+reqwest = { version = "0.12", features = ["json"] }
+shakmaty = { version = "0.27", features = ["alloc", "std"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+async-trait = "0.1"
+regex = "1.10"
+lazy_static = "1.4"
+futures = "0.3"
+rand = "0.8"

@@ -1,0 +1,508 @@
+import React, { useState, useEffect } from 'react';
+import { Chess, Square } from 'chess.js';
+import confetti from 'canvas-confetti';
+import {
+  Sparkles,
+  HelpCircle,
+  RotateCcw,
+  Eye,
+  CheckCircle2,
+  ArrowRight,
+  TrendingDown,
+  Flame,
+  Info,
+} from 'lucide-react';
+
+import { PuzzleWithReview } from '../types';
+import { Chessboard } from './Chessboard';
+import { sounds } from '../utils/sound';
+import { api } from '../api/client';
+
+interface PuzzleSolverProps {
+  puzzleData: PuzzleWithReview;
+  onSolved: (puzzleId: number, success: boolean, quality?: number) => void;
+  onNext?: () => void;
+  userId: number;
+}
+
+export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
+  puzzleData,
+  onSolved,
+  onNext,
+  userId,
+}) => {
+  const { puzzle, game_white, game_black, game_time_class } = puzzleData;
+  const opponent = puzzle.player_color === 'white' ? game_black : game_white;
+
+  // Board state
+  const [currentFen, setCurrentFen] = useState<string>(puzzle.initial_fen);
+  const [chessInstance, setChessInstance] = useState<Chess>(new Chess(puzzle.initial_fen));
+  const [lastMove, setLastMove] = useState<[string, string] | undefined>();
+  const [shapes, setShapes] = useState<any[]>([]);
+
+  // Solution line tracking
+  const [solutionMoves, setSolutionMoves] = useState<string[]>([]);
+  const [currentStep, setCurrentStep] = useState<number>(0);
+
+  // Status flags
+  const [status, setStatus] = useState<'solving' | 'correct' | 'failed' | 'showing_blunder'>('solving');
+  const [hintLevel, setHintLevel] = useState<number>(0);
+  const [startTime, setStartTime] = useState<number>(Date.now());
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [srsSaved, setSrsSaved] = useState<boolean>(false);
+
+  // Parse PV lines
+  useEffect(() => {
+    try {
+      const parsedCont: string[] = JSON.parse(puzzle.continuation_uci || '[]');
+      if (parsedCont.length > 0) {
+        setSolutionMoves(parsedCont);
+      } else {
+        setSolutionMoves([puzzle.best_move_uci]);
+      }
+    } catch {
+      setSolutionMoves([puzzle.best_move_uci]);
+    }
+
+    // Reset state for new puzzle
+    const initialChess = new Chess(puzzle.initial_fen);
+    setChessInstance(initialChess);
+    setCurrentFen(puzzle.initial_fen);
+    setLastMove(undefined);
+    setShapes([]);
+    setCurrentStep(0);
+    setStatus('solving');
+    setHintLevel(0);
+    setStartTime(Date.now());
+    setFeedbackMessage(null);
+    setSrsSaved(false);
+  }, [puzzle.id, puzzle.initial_fen, puzzle.continuation_uci, puzzle.best_move_uci]);
+
+  const parseTags = (): string[] => {
+    try {
+      return JSON.parse(puzzle.tactical_tags || '[]');
+    } catch {
+      return ['Tactic'];
+    }
+  };
+
+  const handleMove = (orig: string, dest: string, promotion = 'q') => {
+    if (status !== 'solving') return;
+
+    const moveUci = `${orig}${dest}${promotion ? promotion : ''}`;
+    const expectedMoveUci = solutionMoves[currentStep] || puzzle.best_move_uci;
+
+    // Check if move is legal in chess.js
+    const testChess = new Chess(currentFen);
+    const moveResult = testChess.move({
+      from: orig as Square,
+      to: dest as Square,
+      promotion: promotion,
+    });
+
+    if (!moveResult) return;
+
+    // Check if player's move matches expected solution
+    const isCorrect =
+      moveUci.startsWith(expectedMoveUci.slice(0, 4)) ||
+      (orig === puzzle.best_move_uci.slice(0, 2) && dest === puzzle.best_move_uci.slice(2, 4));
+
+    if (isCorrect) {
+      const newFen = testChess.fen();
+      setCurrentFen(newFen);
+      setChessInstance(testChess);
+      setLastMove([orig, dest]);
+      setShapes([]);
+
+      const nextStep = currentStep + 1;
+
+      // Check if there is an opponent continuation reply in the PV line
+      if (nextStep < solutionMoves.length) {
+        setFeedbackMessage('Great move! Continuing sequence...');
+        setCurrentStep(nextStep);
+
+        // Auto-play opponent response after short delay
+        setTimeout(() => {
+          const opponentMoveUci = solutionMoves[nextStep];
+          if (opponentMoveUci && opponentMoveUci.length >= 4) {
+            const oppFrom = opponentMoveUci.slice(0, 2);
+            const oppTo = opponentMoveUci.slice(2, 4);
+            const oppProm = opponentMoveUci.length > 4 ? opponentMoveUci[4] : undefined;
+
+            const oppChess = new Chess(newFen);
+            const oppMoveResult = oppChess.move({
+              from: oppFrom as Square,
+              to: oppTo as Square,
+              promotion: oppProm,
+            });
+
+            if (oppMoveResult) {
+              if (oppMoveResult.captured) {
+                sounds.play('capture');
+              } else {
+                sounds.play('move');
+              }
+              setCurrentFen(oppChess.fen());
+              setChessInstance(oppChess);
+              setLastMove([oppFrom, oppTo]);
+              setCurrentStep(nextStep + 1);
+
+              // If that was the last opponent move, puzzle complete
+              if (nextStep + 1 >= solutionMoves.length) {
+                finishPuzzleSuccess();
+              }
+            } else {
+              finishPuzzleSuccess();
+            }
+          } else {
+            finishPuzzleSuccess();
+          }
+        }, 500);
+      } else {
+        finishPuzzleSuccess();
+      }
+    } else {
+      // Incorrect move
+      sounds.play('error');
+      setFeedbackMessage(`Not quite. Try a different approach!`);
+      setStatus('failed');
+      
+      // Flash the wrong move red
+      setShapes([
+        {
+          orig: orig,
+          dest: dest,
+          brush: 'red',
+        },
+      ]);
+
+      // Reset board position back after brief pause
+      setTimeout(() => {
+        setCurrentFen(chessInstance.fen());
+        setStatus('solving');
+      }, 700);
+    }
+  };
+
+  const finishPuzzleSuccess = () => {
+    setStatus('correct');
+    sounds.play('victory');
+    setFeedbackMessage('Brilliant! You found the winning continuation.');
+
+    try {
+      confetti({
+        particleCount: 70,
+        spread: 60,
+        origin: { y: 0.7 },
+      });
+    } catch {
+      // ignore
+    }
+
+    if (!srsSaved) {
+      setSrsSaved(true);
+      onSolved(puzzle.id, true);
+    }
+  };
+
+  const handleShowHint = () => {
+    const nextHint = hintLevel + 1;
+    setHintLevel(nextHint);
+
+    const targetUci = solutionMoves[currentStep] || puzzle.best_move_uci;
+    const fromSq = targetUci.slice(0, 2);
+    const toSq = targetUci.slice(2, 4);
+
+    if (nextHint === 1) {
+      // Circle the piece to move
+      setShapes([{ orig: fromSq, brush: 'yellow' }]);
+      setFeedbackMessage(`Hint: Look at the piece on ${fromSq.toUpperCase()}.`);
+    } else if (nextHint === 2) {
+      // Draw arrow
+      setShapes([{ orig: fromSq, dest: toSq, brush: 'yellow' }]);
+      setFeedbackMessage(`Hint: Move from ${fromSq.toUpperCase()} to ${toSq.toUpperCase()}.`);
+    } else {
+      // Full reveal
+      setShapes([{ orig: fromSq, dest: toSq, brush: 'green' }]);
+      setFeedbackMessage(`Best move: ${puzzle.best_move_san}`);
+    }
+  };
+
+  const handleShowBlunderPunishment = () => {
+    setStatus('showing_blunder');
+    const demoChess = new Chess(puzzle.initial_fen);
+
+    // Play player's blunder move
+    const blunderFrom = puzzle.blunder_move_uci.slice(0, 2);
+    const blunderTo = puzzle.blunder_move_uci.slice(2, 4);
+    const blunderProm = puzzle.blunder_move_uci.length > 4 ? puzzle.blunder_move_uci[4] : undefined;
+
+    demoChess.move({
+      from: blunderFrom as Square,
+      to: blunderTo as Square,
+      promotion: blunderProm,
+    });
+
+    setCurrentFen(demoChess.fen());
+    setLastMove([blunderFrom, blunderTo]);
+    setShapes([{ orig: blunderFrom, dest: blunderTo, brush: 'red' }]);
+    sounds.play('move');
+    setFeedbackMessage(`In the game, you played ${puzzle.blunder_move_san}.`);
+
+    // Then play the punishing opponent reply if present
+    setTimeout(() => {
+      try {
+        const blunderCont: string[] = JSON.parse(puzzle.blunder_continuation_uci || '[]');
+        if (blunderCont.length > 0) {
+          const punishUci = blunderCont[0];
+          const pFrom = punishUci.slice(0, 2);
+          const pTo = punishUci.slice(2, 4);
+          const pProm = punishUci.length > 4 ? punishUci[4] : undefined;
+
+          demoChess.move({
+            from: pFrom as Square,
+            to: pTo as Square,
+            promotion: pProm,
+          });
+
+          setCurrentFen(demoChess.fen());
+          setLastMove([pFrom, pTo]);
+          setShapes([{ orig: pFrom, dest: pTo, brush: 'red' }]);
+          sounds.play('capture');
+          setFeedbackMessage(`Opponent could punish with ${punishUci}, seizing total control.`);
+        }
+      } catch {
+        // ignore
+      }
+    }, 900);
+  };
+
+  const handleResetPuzzle = () => {
+    const initialChess = new Chess(puzzle.initial_fen);
+    setChessInstance(initialChess);
+    setCurrentFen(puzzle.initial_fen);
+    setLastMove(undefined);
+    setShapes([]);
+    setCurrentStep(0);
+    setStatus('solving');
+    setFeedbackMessage(null);
+  };
+
+  const handleSrsRating = async (quality: number) => {
+    setIsSubmitting(true);
+    try {
+      await api.submitSolve(puzzle.id, {
+        user_id: userId,
+        success: quality >= 3,
+        hints_used: hintLevel,
+        time_taken_ms: Date.now() - startTime,
+        quality,
+      });
+      if (onNext) {
+        onNext();
+      }
+    } catch (err) {
+      console.error('Failed to submit SRS rating:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const evalSwing = (puzzle.eval_before - puzzle.eval_after_blunder) / 100;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start max-w-7xl mx-auto px-4 py-6">
+      {/* Left Column: Board */}
+      <div className="lg:col-span-7 flex flex-col items-center">
+        {/* Opponent Info Header */}
+        <div className="w-full max-w-[560px] flex items-center justify-between px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-t-xl text-xs font-medium text-slate-300">
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full ${puzzle.player_color === 'white' ? 'bg-slate-700 border border-slate-500' : 'bg-slate-100'}`} />
+            <span className="font-semibold text-slate-100">{opponent}</span>
+            <span className="text-slate-500 capitalize">({game_time_class})</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {puzzle.opening_name && (
+              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 truncate max-w-[200px]">
+                {puzzle.opening_name}
+              </span>
+            )}
+            <span className="text-slate-400">Move {puzzle.move_number}</span>
+          </div>
+        </div>
+
+        {/* Board Component */}
+        <Chessboard
+          fen={currentFen}
+          orientation={puzzle.player_color}
+          lastMove={lastMove}
+          shapes={shapes}
+          canMove={status === 'solving'}
+          onMove={handleMove}
+        />
+
+        {/* User Info Footer */}
+        <div className="w-full max-w-[560px] flex items-center justify-between px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-b-xl text-xs font-medium text-slate-300 mt-0">
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full ${puzzle.player_color === 'white' ? 'bg-slate-100' : 'bg-slate-700 border border-slate-500'}`} />
+            <span className="font-semibold text-emerald-400">You</span>
+            <span className="text-slate-500">({puzzle.player_color})</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {parseTags().map((tag, i) => (
+              <span key={i} className="px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 text-[11px]">
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Right Column: Puzzle Controls, Blunder Details & Spaced Repetition */}
+      <div className="lg:col-span-5 flex flex-col gap-5">
+        {/* Blunder Recap Banner */}
+        <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-5 rounded-2xl shadow-xl">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${
+                puzzle.blunder_severity === 'blunder'
+                  ? 'bg-rose-950/80 text-rose-300 border border-rose-800/80'
+                  : puzzle.blunder_severity === 'mistake'
+                  ? 'bg-amber-950/80 text-amber-300 border border-amber-800/80'
+                  : 'bg-yellow-950/80 text-yellow-300 border border-yellow-800/80'
+              }`}>
+                {puzzle.blunder_severity}
+              </span>
+              <span className="text-xs text-rose-400 font-mono flex items-center gap-1 font-semibold">
+                <TrendingDown className="w-3.5 h-3.5" />
+                -{evalSwing.toFixed(1)} eval
+              </span>
+            </div>
+            <span className="text-xs text-slate-400 font-mono">
+              Rep #{puzzleData.review.repetition_number}
+            </span>
+          </div>
+
+          <div className="text-sm text-slate-300 leading-relaxed mb-4">
+            In this position you played <span className="font-bold text-rose-400 font-mono text-base px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-900/60">{puzzle.blunder_move_san}</span>.
+            <p className="mt-1 text-slate-400">
+              Can you find the master-level continuation to punish or seize the advantage?
+            </p>
+          </div>
+
+          {/* Feedback Message */}
+          {feedbackMessage && (
+            <div className={`p-3 rounded-xl text-sm flex items-center gap-2.5 font-medium mb-3 transition-all ${
+              status === 'correct'
+                ? 'bg-emerald-950/80 border border-emerald-700/60 text-emerald-200'
+                : status === 'showing_blunder'
+                ? 'bg-rose-950/80 border border-rose-700/60 text-rose-200'
+                : 'bg-slate-800/90 border border-slate-700 text-slate-200'
+            }`}>
+              {status === 'correct' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : status === 'showing_blunder' ? (
+                <Info className="w-5 h-5 text-rose-400 shrink-0" />
+              ) : (
+                <HelpCircle className="w-5 h-5 text-amber-400 shrink-0" />
+              )}
+              <span>{feedbackMessage}</span>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800/80">
+            <button
+              onClick={handleShowHint}
+              disabled={status === 'correct' || hintLevel >= 3}
+              className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700/60"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              {hintLevel === 0 ? 'Hint' : hintLevel === 1 ? 'Show Target' : 'Reveal Move'}
+            </button>
+
+            <button
+              onClick={handleShowBlunderPunishment}
+              className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-xs font-semibold text-rose-300 transition-colors border border-rose-800/50"
+            >
+              <Eye className="w-3.5 h-3.5 text-rose-400" />
+              Why was my move bad?
+            </button>
+
+            {status === 'showing_blunder' && (
+              <button
+                onClick={handleResetPuzzle}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors border border-slate-700"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Back to Puzzle
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Spaced Repetition Rating Card when solved */}
+        {status === 'correct' && (
+          <div className="bg-slate-900 border border-emerald-800/80 p-5 rounded-2xl shadow-xl animate-fade-in">
+            <div className="flex items-center gap-2 mb-2 text-emerald-400 font-semibold text-sm">
+              <Flame className="w-4 h-4" />
+              Rate your recall (SM-2 Spaced Repetition):
+            </div>
+            <p className="text-xs text-slate-400 mb-4">
+              How easily did you spot the tactic? This tunes your next review schedule.
+            </p>
+
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                onClick={() => handleSrsRating(1)}
+                disabled={isSubmitting}
+                className="flex flex-col items-center p-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-xs text-rose-200 transition-all hover:scale-105"
+              >
+                <span className="font-bold text-sm">Again</span>
+                <span className="text-[10px] text-rose-400 mt-1">&lt; 1 day</span>
+              </button>
+
+              <button
+                onClick={() => handleSrsRating(3)}
+                disabled={isSubmitting}
+                className="flex flex-col items-center p-2.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/60 text-xs text-amber-200 transition-all hover:scale-105"
+              >
+                <span className="font-bold text-sm">Hard</span>
+                <span className="text-[10px] text-amber-400 mt-1">1-2 days</span>
+              </button>
+
+              <button
+                onClick={() => handleSrsRating(4)}
+                disabled={isSubmitting}
+                className="flex flex-col items-center p-2.5 rounded-xl bg-blue-950/40 hover:bg-blue-900/60 border border-blue-800/60 text-xs text-blue-200 transition-all hover:scale-105"
+              >
+                <span className="font-bold text-sm">Good</span>
+                <span className="text-[10px] text-blue-400 mt-1">3-5 days</span>
+              </button>
+
+              <button
+                onClick={() => handleSrsRating(5)}
+                disabled={isSubmitting}
+                className="flex flex-col items-center p-2.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-700 text-xs text-emerald-200 transition-all hover:scale-105 font-medium shadow-lg shadow-emerald-950/50"
+              >
+                <span className="font-bold text-sm">Easy</span>
+                <span className="text-[10px] text-emerald-400 mt-1">1+ week</span>
+              </button>
+            </div>
+
+            {onNext && (
+              <button
+                onClick={onNext}
+                className="w-full mt-4 flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-900/40 transition-colors"
+              >
+                <span>Next Puzzle</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
