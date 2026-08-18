@@ -7,6 +7,8 @@ import {
   SyncRequest,
   SyncStatus,
   User,
+  ValidateMoveRequest,
+  ValidateMoveResponse,
 } from '../types';
 
 const API_BASE = '/api';
@@ -95,6 +97,18 @@ export const api = {
     });
     if (!res.ok) {
       throw new Error('Failed to evaluate position');
+    }
+    return res.json();
+  },
+
+  async validateMove(req: ValidateMoveRequest): Promise<ValidateMoveResponse> {
+    const res = await fetch(`${API_BASE}/engine/validate_move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      throw new Error('Failed to validate move');
     }
     return res.json();
   },

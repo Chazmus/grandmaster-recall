@@ -193,14 +193,16 @@ impl GameAnalyzer {
                             best_move_uci.clone()
                         };
 
+                        // Limit continuation to at most 3 plies (e.g. Player move -> Opponent reply -> Player win)
                         let continuation_uci = if let Some(first_line) = eval_before_res.lines.first() {
-                            first_line.pv.clone()
+                            first_line.pv.iter().take(3).cloned().collect()
                         } else {
                             vec![best_move_uci.clone()]
                         };
 
+                        // Limit blunder punishment demonstration to 2 plies
                         let blunder_continuation_uci = if let Some(first_line) = eval_after_res.lines.first() {
-                            first_line.pv.clone()
+                            first_line.pv.iter().take(2).cloned().collect()
                         } else {
                             Vec::new()
                         };
@@ -351,14 +353,9 @@ mod tests {
 
     #[test]
     fn test_score_from_pov() {
-        // White perspective (+150 cp)
         assert_eq!(GameAnalyzer::score_from_pov(Some(150), None, true), 150);
-        // Black perspective (+150 cp for White -> -150 cp for Black)
         assert_eq!(GameAnalyzer::score_from_pov(Some(150), None, false), -150);
-
-        // Mate in 2 from active player POV
         assert_eq!(GameAnalyzer::score_from_pov(None, Some(2), true), 9800);
-        // Mate in 2 from opponent POV
         assert_eq!(GameAnalyzer::score_from_pov(None, Some(2), false), -9800);
     }
 
@@ -367,7 +364,6 @@ mod tests {
         let pos = Chess::default();
         let move_parsed = "e2e4".parse::<UciMove>().unwrap().to_move(&pos).unwrap();
         
-        // Move 2 -> should include "Opening Mistake"
         let tags = GameAnalyzer::detect_tactical_tags(&pos, &move_parsed, "d2d4", 2, "blunder");
         assert!(tags.contains(&"Opening Mistake".to_string()));
         assert!(tags.contains(&"Missed Tactic".to_string()));

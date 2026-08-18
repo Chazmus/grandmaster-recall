@@ -85,8 +85,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/puzzles/all", get(routes::puzzles::get_all_puzzles))
         .route("/api/puzzles/:id", get(routes::puzzles::get_puzzle_by_id))
         .route("/api/puzzles/:id/solve", post(routes::puzzles::submit_solve))
-        // Engine evaluation route
+        // Engine evaluation & move validation routes
         .route("/api/engine/evaluate", post(routes::engine::evaluate_position))
+        .route("/api/engine/validate_move", post(routes::engine::validate_move))
         // Stats route
         .route("/api/stats", get(routes::stats::get_user_stats))
         .layer(cors)

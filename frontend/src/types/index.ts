@@ -90,6 +90,21 @@ export interface SolveResponse {
   is_mastered: boolean;
 }
 
+export interface ValidateMoveRequest {
+  fen: string;
+  move_uci: string;
+  expected_best_uci: string;
+  player_color: Color;
+}
+
+export interface ValidateMoveResponse {
+  is_valid: boolean;
+  is_best: boolean;
+  eval_diff_cp: number;
+  explanation: string;
+  opponent_reply_uci: string | null;
+}
+
 export interface MoveEval {
   uci: string;
   san?: string;

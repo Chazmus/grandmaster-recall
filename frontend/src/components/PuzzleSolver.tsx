@@ -11,6 +11,8 @@ import {
   TrendingDown,
   Flame,
   Info,
+  Swords,
+  Loader2,
 } from 'lucide-react';
 
 import { PuzzleWithReview } from '../types';
@@ -40,24 +42,26 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
   const [shapes, setShapes] = useState<any[]>([]);
 
-  // Solution line tracking
+  // Solution moves (capped to max 3 plies for concise tactical focus)
   const [solutionMoves, setSolutionMoves] = useState<string[]>([]);
   const [currentStep, setCurrentStep] = useState<number>(0);
 
   // Status flags
-  const [status, setStatus] = useState<'solving' | 'correct' | 'failed' | 'showing_blunder'>('solving');
+  const [status, setStatus] = useState<'solving' | 'correct' | 'failed' | 'showing_blunder' | 'sandbox'>('solving');
   const [hintLevel, setHintLevel] = useState<number>(0);
   const [startTime, setStartTime] = useState<number>(Date.now());
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isValidatingMove, setIsValidatingMove] = useState<boolean>(false);
   const [srsSaved, setSrsSaved] = useState<boolean>(false);
 
-  // Parse PV lines
+  // Parse PV lines & cap to max 3 plies
   useEffect(() => {
     try {
       const parsedCont: string[] = JSON.parse(puzzle.continuation_uci || '[]');
       if (parsedCont.length > 0) {
-        setSolutionMoves(parsedCont);
+        // Capped to at most 3 plies (e.g. User move -> Computer reply -> User finish)
+        setSolutionMoves(parsedCont.slice(0, 3));
       } else {
         setSolutionMoves([puzzle.best_move_uci]);
       }
@@ -65,7 +69,6 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       setSolutionMoves([puzzle.best_move_uci]);
     }
 
-    // Reset state for new puzzle
     const initialChess = new Chess(puzzle.initial_fen);
     setChessInstance(initialChess);
     setCurrentFen(puzzle.initial_fen);
@@ -87,13 +90,19 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     }
   };
 
-  const handleMove = (orig: string, dest: string, promotion = 'q') => {
-    if (status !== 'solving') return;
+  const handleMove = async (orig: string, dest: string, promotion = 'q') => {
+    if (status === 'sandbox') {
+      // In sandbox mode, play move and let engine reply indefinitely
+      handleSandboxMove(orig, dest, promotion);
+      return;
+    }
+
+    if (status !== 'solving' || isValidatingMove) return;
 
     const moveUci = `${orig}${dest}${promotion ? promotion : ''}`;
     const expectedMoveUci = solutionMoves[currentStep] || puzzle.best_move_uci;
 
-    // Check if move is legal in chess.js
+    // Check legal in chess.js
     const testChess = new Chess(currentFen);
     const moveResult = testChess.move({
       from: orig as Square,
@@ -103,92 +112,151 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
 
     if (!moveResult) return;
 
-    // Check if player's move matches expected solution
-    const isCorrect =
-      moveUci.startsWith(expectedMoveUci.slice(0, 4)) ||
-      (orig === puzzle.best_move_uci.slice(0, 2) && dest === puzzle.best_move_uci.slice(2, 4));
+    setIsValidatingMove(true);
 
-    if (isCorrect) {
-      const newFen = testChess.fen();
-      setCurrentFen(newFen);
-      setChessInstance(testChess);
-      setLastMove([orig, dest]);
-      setShapes([]);
+    try {
+      // Validate move against engine (flexible acceptance)
+      const valRes = await api.validateMove({
+        fen: currentFen,
+        move_uci: moveUci,
+        expected_best_uci: expectedMoveUci,
+        player_color: puzzle.player_color,
+      });
 
-      const nextStep = currentStep + 1;
+      if (valRes.is_valid) {
+        const newFen = testChess.fen();
+        setCurrentFen(newFen);
+        setChessInstance(testChess);
+        setLastMove([orig, dest]);
+        setShapes([]);
 
-      // Check if there is an opponent continuation reply in the PV line
-      if (nextStep < solutionMoves.length) {
-        setFeedbackMessage('Great move! Continuing sequence...');
-        setCurrentStep(nextStep);
+        const nextStep = currentStep + 1;
+        const maxPlies = Math.min(3, solutionMoves.length);
 
-        // Auto-play opponent response after short delay
-        setTimeout(() => {
-          const opponentMoveUci = solutionMoves[nextStep];
-          if (opponentMoveUci && opponentMoveUci.length >= 4) {
-            const oppFrom = opponentMoveUci.slice(0, 2);
-            const oppTo = opponentMoveUci.slice(2, 4);
-            const oppProm = opponentMoveUci.length > 4 ? opponentMoveUci[4] : undefined;
+        // Check if there is an opponent reply to play out
+        if (nextStep < maxPlies && valRes.opponent_reply_uci) {
+          setFeedbackMessage(valRes.explanation || 'Great move! Continuation...');
+          setCurrentStep(nextStep);
 
-            const oppChess = new Chess(newFen);
-            const oppMoveResult = oppChess.move({
-              from: oppFrom as Square,
-              to: oppTo as Square,
-              promotion: oppProm,
-            });
+          setTimeout(() => {
+            const oppMoveUci = valRes.opponent_reply_uci!;
+            if (oppMoveUci && oppMoveUci.length >= 4) {
+              const oppFrom = oppMoveUci.slice(0, 2);
+              const oppTo = oppMoveUci.slice(2, 4);
+              const oppProm = oppMoveUci.length > 4 ? oppMoveUci[4] : undefined;
 
-            if (oppMoveResult) {
-              if (oppMoveResult.captured) {
-                sounds.play('capture');
+              const oppChess = new Chess(newFen);
+              const oppMoveResult = oppChess.move({
+                from: oppFrom as Square,
+                to: oppTo as Square,
+                promotion: oppProm,
+              });
+
+              if (oppMoveResult) {
+                if (oppMoveResult.captured) {
+                  sounds.play('capture');
+                } else {
+                  sounds.play('move');
+                }
+                setCurrentFen(oppChess.fen());
+                setChessInstance(oppChess);
+                setLastMove([oppFrom, oppTo]);
+                setCurrentStep(nextStep + 1);
+
+                if (nextStep + 1 >= maxPlies) {
+                  finishPuzzleSuccess(valRes.is_best);
+                }
               } else {
-                sounds.play('move');
-              }
-              setCurrentFen(oppChess.fen());
-              setChessInstance(oppChess);
-              setLastMove([oppFrom, oppTo]);
-              setCurrentStep(nextStep + 1);
-
-              // If that was the last opponent move, puzzle complete
-              if (nextStep + 1 >= solutionMoves.length) {
-                finishPuzzleSuccess();
+                finishPuzzleSuccess(valRes.is_best);
               }
             } else {
-              finishPuzzleSuccess();
+              finishPuzzleSuccess(valRes.is_best);
             }
-          } else {
-            finishPuzzleSuccess();
-          }
-        }, 500);
+          }, 500);
+        } else {
+          finishPuzzleSuccess(valRes.is_best);
+        }
       } else {
-        finishPuzzleSuccess();
-      }
-    } else {
-      // Incorrect move
-      sounds.play('error');
-      setFeedbackMessage(`Not quite. Try a different approach!`);
-      setStatus('failed');
-      
-      // Flash the wrong move red
-      setShapes([
-        {
-          orig: orig,
-          dest: dest,
-          brush: 'red',
-        },
-      ]);
+        // Invalid / blunder move
+        sounds.play('error');
+        setFeedbackMessage(valRes.explanation || 'Not quite. Try a different approach!');
+        setStatus('failed');
 
-      // Reset board position back after brief pause
-      setTimeout(() => {
-        setCurrentFen(chessInstance.fen());
-        setStatus('solving');
-      }, 700);
+        setShapes([
+          {
+            orig: orig,
+            dest: dest,
+            brush: 'red',
+          },
+        ]);
+
+        setTimeout(() => {
+          setCurrentFen(chessInstance.fen());
+          setStatus('solving');
+        }, 700);
+      }
+    } catch (err) {
+      console.error('Validation error:', err);
+    } finally {
+      setIsValidatingMove(false);
     }
   };
 
-  const finishPuzzleSuccess = () => {
+  const handleSandboxMove = async (orig: string, dest: string, promotion = 'q') => {
+    const testChess = new Chess(currentFen);
+    const res = testChess.move({
+      from: orig as Square,
+      to: dest as Square,
+      promotion: promotion,
+    });
+    if (!res) return;
+
+    const newFen = testChess.fen();
+    setCurrentFen(newFen);
+    setChessInstance(testChess);
+    setLastMove([orig, dest]);
+
+    // Engine reply
+    try {
+      const evalRes = await api.evaluatePosition(newFen, 12, 1);
+      if (evalRes.best_move && evalRes.best_move.length >= 4) {
+        setTimeout(() => {
+          const oppFrom = evalRes.best_move.slice(0, 2);
+          const oppTo = evalRes.best_move.slice(2, 4);
+          const oppProm = evalRes.best_move.length > 4 ? evalRes.best_move[4] : undefined;
+
+          const oppChess = new Chess(newFen);
+          const oppMoveResult = oppChess.move({
+            from: oppFrom as Square,
+            to: oppTo as Square,
+            promotion: oppProm,
+          });
+
+          if (oppMoveResult) {
+            if (oppMoveResult.captured) {
+              sounds.play('capture');
+            } else {
+              sounds.play('move');
+            }
+            setCurrentFen(oppChess.fen());
+            setChessInstance(oppChess);
+            setLastMove([oppFrom, oppTo]);
+          }
+        }, 400);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const finishPuzzleSuccess = (isBest = true) => {
     setStatus('correct');
     sounds.play('victory');
-    setFeedbackMessage('Brilliant! You found the winning continuation.');
+    setFeedbackMessage(
+      isBest
+        ? 'Brilliant! You found the winning continuation.'
+        : 'Good move! You found a sound, winning continuation.'
+    );
 
     try {
       confetti({
@@ -215,15 +283,12 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     const toSq = targetUci.slice(2, 4);
 
     if (nextHint === 1) {
-      // Circle the piece to move
       setShapes([{ orig: fromSq, brush: 'yellow' }]);
       setFeedbackMessage(`Hint: Look at the piece on ${fromSq.toUpperCase()}.`);
     } else if (nextHint === 2) {
-      // Draw arrow
       setShapes([{ orig: fromSq, dest: toSq, brush: 'yellow' }]);
       setFeedbackMessage(`Hint: Move from ${fromSq.toUpperCase()} to ${toSq.toUpperCase()}.`);
     } else {
-      // Full reveal
       setShapes([{ orig: fromSq, dest: toSq, brush: 'green' }]);
       setFeedbackMessage(`Best move: ${puzzle.best_move_san}`);
     }
@@ -233,7 +298,6 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     setStatus('showing_blunder');
     const demoChess = new Chess(puzzle.initial_fen);
 
-    // Play player's blunder move
     const blunderFrom = puzzle.blunder_move_uci.slice(0, 2);
     const blunderTo = puzzle.blunder_move_uci.slice(2, 4);
     const blunderProm = puzzle.blunder_move_uci.length > 4 ? puzzle.blunder_move_uci[4] : undefined;
@@ -250,7 +314,6 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     sounds.play('move');
     setFeedbackMessage(`In the game, you played ${puzzle.blunder_move_san}.`);
 
-    // Then play the punishing opponent reply if present
     setTimeout(() => {
       try {
         const blunderCont: string[] = JSON.parse(puzzle.blunder_continuation_uci || '[]');
@@ -287,6 +350,11 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     setCurrentStep(0);
     setStatus('solving');
     setFeedbackMessage(null);
+  };
+
+  const handleStartSandbox = () => {
+    setStatus('sandbox');
+    setFeedbackMessage('Freeplay Mode: Play out any moves against Stockfish!');
   };
 
   const handleSrsRating = async (quality: number) => {
@@ -338,7 +406,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
           orientation={puzzle.player_color}
           lastMove={lastMove}
           shapes={shapes}
-          canMove={status === 'solving'}
+          canMove={status === 'solving' || status === 'sandbox'}
           onMove={handleMove}
         />
 
@@ -387,7 +455,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
           <div className="text-sm text-slate-300 leading-relaxed mb-4">
             In this position you played <span className="font-bold text-rose-400 font-mono text-base px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-900/60">{puzzle.blunder_move_san}</span>.
             <p className="mt-1 text-slate-400">
-              Can you find the master-level continuation to punish or seize the advantage?
+              Find any sound winning continuation to maintain the advantage!
             </p>
           </div>
 
@@ -398,12 +466,18 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
                 ? 'bg-emerald-950/80 border border-emerald-700/60 text-emerald-200'
                 : status === 'showing_blunder'
                 ? 'bg-rose-950/80 border border-rose-700/60 text-rose-200'
+                : status === 'sandbox'
+                ? 'bg-indigo-950/80 border border-indigo-700/60 text-indigo-200'
                 : 'bg-slate-800/90 border border-slate-700 text-slate-200'
             }`}>
-              {status === 'correct' ? (
+              {isValidatingMove ? (
+                <Loader2 className="w-5 h-5 text-emerald-400 animate-spin shrink-0" />
+              ) : status === 'correct' ? (
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
               ) : status === 'showing_blunder' ? (
                 <Info className="w-5 h-5 text-rose-400 shrink-0" />
+              ) : status === 'sandbox' ? (
+                <Swords className="w-5 h-5 text-indigo-400 shrink-0" />
               ) : (
                 <HelpCircle className="w-5 h-5 text-amber-400 shrink-0" />
               )}
@@ -430,7 +504,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
               Why was my move bad?
             </button>
 
-            {status === 'showing_blunder' && (
+            {(status === 'showing_blunder' || status === 'sandbox') && (
               <button
                 onClick={handleResetPuzzle}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors border border-slate-700"
@@ -491,15 +565,25 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
               </button>
             </div>
 
-            {onNext && (
+            <div className="flex items-center gap-3 mt-4">
               <button
-                onClick={onNext}
-                className="w-full mt-4 flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-900/40 transition-colors"
+                onClick={handleStartSandbox}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition-colors"
               >
-                <span>Next Puzzle</span>
-                <ArrowRight className="w-4 h-4" />
+                <Swords className="w-4 h-4 text-amber-400" />
+                <span>Freeplay vs Stockfish</span>
               </button>
-            )}
+
+              {onNext && (
+                <button
+                  onClick={onNext}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg shadow-emerald-900/40 transition-colors"
+                >
+                  <span>Next Puzzle</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

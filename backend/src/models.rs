@@ -137,6 +137,23 @@ pub struct EngineEvalResponse {
     pub lines: Vec<MoveEval>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValidateMoveRequest {
+    pub fen: String,
+    pub move_uci: String,
+    pub expected_best_uci: String,
+    pub player_color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidateMoveResponse {
+    pub is_valid: bool,
+    pub is_best: bool,
+    pub eval_diff_cp: i32,
+    pub explanation: String,
+    pub opponent_reply_uci: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatsSummary {
     pub total_puzzles: i64,
