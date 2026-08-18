@@ -95,3 +95,11 @@ chess-trainer/
 ├── test.sh                  # Comprehensive test runner script
 └── start.sh                 # App launcher script
 ```
+
+---
+
+## 📜 Third-Party Assets & Attribution
+
+This project uses chess piece artwork, audio themes, and libraries from the **[Lichess.org (Lila)](https://github.com/lichess-org/lila)** open-source ecosystem, **Stockfish**, and independent artists.
+
+Please see **[`ATTRIBUTION.md`](./ATTRIBUTION.md)** for the complete list of piece artists, sound creators, and open-source licenses (GPLv3, AGPLv3, Apache 2.0, CC-BY, CC-BY-SA, MIT).
