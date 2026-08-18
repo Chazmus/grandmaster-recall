@@ -23,8 +23,6 @@ export const GameSyncModal: React.FC<GameSyncModalProps> = ({
     bullet: false,
     daily: false,
   });
-  const [maxGames, setMaxGames] = useState<number>(20);
-  const [engineDepth, setEngineDepth] = useState<number>(13);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,9 +56,9 @@ export const GameSyncModal: React.FC<GameSyncModalProps> = ({
       const status = await api.startSync({
         username: username.trim(),
         time_classes: selectedTimeClasses,
-        max_games: maxGames,
+        max_games: 5,
         months_back: 2,
-        engine_depth: engineDepth,
+        engine_depth: 18,
       });
 
       setSyncStatus(status);
@@ -222,38 +220,15 @@ export const GameSyncModal: React.FC<GameSyncModalProps> = ({
               </div>
             </div>
 
-            {/* Max Games & Engine Depth */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Max Games
-                </label>
-                <select
-                  value={maxGames}
-                  onChange={(e) => setMaxGames(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
-                >
-                  <option value={10}>10 games (fast scan)</option>
-                  <option value={20}>20 games (recommended)</option>
-                  <option value={50}>50 games (thorough)</option>
-                  <option value={100}>100 games (deep)</option>
-                </select>
+            {/* Background Daemon Info Banner */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs text-slate-400 space-y-1">
+              <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Automatic Background Buffer Active</span>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Stockfish Depth
-                </label>
-                <select
-                  value={engineDepth}
-                  onChange={(e) => setEngineDepth(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
-                >
-                  <option value={12}>Depth 12 (ultra fast)</option>
-                  <option value={14}>Depth 14 (balanced)</option>
-                  <option value={16}>Depth 16 (high precision)</option>
-                </select>
-              </div>
+              <p className="text-[11px] leading-relaxed text-slate-400">
+                The server automatically maintains 10–16 fresh blunder puzzles at <strong>Master Depth (18)</strong> in the background without pegging your CPU.
+              </p>
             </div>
 
             {/* Action button */}
@@ -262,7 +237,7 @@ export const GameSyncModal: React.FC<GameSyncModalProps> = ({
               className="w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm shadow-xl shadow-emerald-950/60 transition-all hover:scale-[1.01] active:scale-98 flex items-center justify-center gap-2"
             >
               <RefreshCw className="w-4 h-4" />
-              Fetch & Run Engine Analysis
+              Connect & Start Training
             </button>
           </form>
         )}

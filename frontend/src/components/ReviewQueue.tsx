@@ -40,9 +40,16 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/70 border border-slate-800 p-8 shadow-2xl">
         <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div>
-            <div className="flex items-center gap-2 text-indigo-400 font-semibold text-xs tracking-wider uppercase mb-2">
-              <BrainCircuit className="w-4 h-4" />
-              Spaced Repetition Active
+            <div className="flex flex-wrap items-center gap-2.5 text-xs tracking-wider uppercase mb-2">
+              <span className="flex items-center gap-1.5 text-indigo-400 font-semibold">
+                <BrainCircuit className="w-4 h-4" />
+                Spaced Repetition Active
+              </span>
+              <span className="text-slate-600 hidden sm:inline">•</span>
+              <span className="flex items-center gap-1.5 text-emerald-400/90 font-medium lowercase first-letter:uppercase">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                Auto-buffer active
+              </span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
               Welcome back, <span className="text-emerald-400">{username}</span>

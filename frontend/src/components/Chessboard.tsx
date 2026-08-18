@@ -78,12 +78,12 @@ export const Chessboard: React.FC<ChessboardProps> = ({
             }
 
             // Check if promotion
-            let promotion = undefined;
+            let promotion: string | undefined = undefined;
             const piece = chessInstance.get(orig as Square);
             if (
               piece?.type === 'p' &&
-              ((dest.endsWith('8') && orientation === 'white') ||
-                (dest.endsWith('1') && orientation === 'black'))
+              ((dest.endsWith('8') && piece.color === 'w') ||
+                (dest.endsWith('1') && piece.color === 'b'))
             ) {
               promotion = 'q'; // Default to Queen for fast puzzle solving
             }

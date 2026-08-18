@@ -25,7 +25,16 @@ pub async fn get_or_create_user(
     }
 
     match db::get_or_create_user(&state.db, clean).await {
-        Ok(user) => Ok(Json(user)),
+        Ok(user) => {
+            // Gently check buffer in background
+            let bg_state = state.clone();
+            let bg_user = user.clone();
+            tokio::spawn(async move {
+                let _ = crate::background::replenish_user_buffer(&bg_state, &bg_user).await;
+            });
+
+            Ok(Json(user))
+        }
         Err(e) => {
             error!("Error in get_or_create_user: {:?}", e);
             Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))

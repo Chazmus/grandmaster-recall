@@ -12,6 +12,7 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod analyzer;
+mod background;
 mod chess_com;
 mod db;
 mod engine;
@@ -91,9 +92,15 @@ async fn main() -> anyhow::Result<()> {
         // Stats route
         .route("/api/stats", get(routes::stats::get_user_stats))
         .layer(cors)
-        .with_state(state);
+        .with_state(state.clone());
 
-    // 7. Bind & Serve
+    // 7. Spawn Watermark Background Puzzle Daemon
+    let daemon_state = state;
+    tokio::spawn(async move {
+        background::run_background_puzzle_daemon(daemon_state).await;
+    });
+
+    // 8. Bind & Serve
     let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
     info!("Server listening on http://{}", addr);
 

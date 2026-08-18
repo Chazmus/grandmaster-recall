@@ -13,6 +13,7 @@ import {
   Info,
   Swords,
   Loader2,
+  Award,
 } from 'lucide-react';
 
 import { PuzzleWithReview } from '../types';
@@ -25,6 +26,14 @@ interface PuzzleSolverProps {
   onSolved: (puzzleId: number, success: boolean, quality?: number) => void;
   onNext?: () => void;
   userId: number;
+}
+
+interface AlternativeContext {
+  fenBefore: string;
+  expectedUci: string;
+  bestSan: string;
+  stepIndex: number;
+  remainingMoves: string[];
 }
 
 export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
@@ -47,13 +56,20 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   const [currentStep, setCurrentStep] = useState<number>(0);
 
   // Status flags
-  const [status, setStatus] = useState<'solving' | 'correct' | 'failed' | 'showing_blunder' | 'sandbox'>('solving');
+  const [status, setStatus] = useState<'solving' | 'correct' | 'failed' | 'showing_blunder' | 'showing_best' | 'sandbox'>('solving');
   const [hintLevel, setHintLevel] = useState<number>(0);
   const [startTime, setStartTime] = useState<number>(Date.now());
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isValidatingMove, setIsValidatingMove] = useState<boolean>(false);
   const [srsSaved, setSrsSaved] = useState<boolean>(false);
+
+  // Alternative good-move tracking
+  const [isAlternativeSolution, setIsAlternativeSolution] = useState<boolean>(false);
+  const [alternativeExplanation, setAlternativeExplanation] = useState<string | null>(null);
+  const [alternativeContext, setAlternativeContext] = useState<AlternativeContext | null>(null);
+  const [userSolvedFen, setUserSolvedFen] = useState<string | null>(null);
+  const [userSolvedLastMove, setUserSolvedLastMove] = useState<[string, string] | undefined>();
 
   // Parse PV lines & cap to max 3 plies
   useEffect(() => {
@@ -80,6 +96,11 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     setStartTime(Date.now());
     setFeedbackMessage(null);
     setSrsSaved(false);
+    setIsAlternativeSolution(false);
+    setAlternativeExplanation(null);
+    setAlternativeContext(null);
+    setUserSolvedFen(null);
+    setUserSolvedLastMove(undefined);
   }, [puzzle.id, puzzle.initial_fen, puzzle.continuation_uci, puzzle.best_move_uci]);
 
   const parseTags = (): string[] => {
@@ -90,7 +111,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     }
   };
 
-  const handleMove = async (orig: string, dest: string, promotion = 'q') => {
+  const handleMove = async (orig: string, dest: string, promotion?: string) => {
     if (status === 'sandbox') {
       // In sandbox mode, play move and let engine reply indefinitely
       handleSandboxMove(orig, dest, promotion);
@@ -99,15 +120,25 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
 
     if (status !== 'solving' || isValidatingMove) return;
 
-    const moveUci = `${orig}${dest}${promotion ? promotion : ''}`;
+    let actualPromotion = promotion;
+    const testChess = new Chess(currentFen);
+    const piece = testChess.get(orig as Square);
+    if (
+      !actualPromotion &&
+      piece?.type === 'p' &&
+      ((dest.endsWith('8') && piece.color === 'w') || (dest.endsWith('1') && piece.color === 'b'))
+    ) {
+      actualPromotion = 'q';
+    }
+
+    const moveUci = `${orig}${dest}${actualPromotion ? actualPromotion : ''}`;
     const expectedMoveUci = solutionMoves[currentStep] || puzzle.best_move_uci;
 
     // Check legal in chess.js
-    const testChess = new Chess(currentFen);
     const moveResult = testChess.move({
       from: orig as Square,
       to: dest as Square,
-      promotion: promotion,
+      promotion: actualPromotion,
     });
 
     if (!moveResult) return;
@@ -124,11 +155,43 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       });
 
       if (valRes.is_valid) {
+        if (!valRes.is_best) {
+          setIsAlternativeSolution(true);
+          if (valRes.explanation) {
+            setAlternativeExplanation(valRes.explanation);
+          }
+
+          // Compute the SAN for the expected best move at this specific step
+          let stepBestSan = expectedMoveUci;
+          try {
+            const stepChess = new Chess(currentFen);
+            const sFrom = expectedMoveUci.slice(0, 2) as Square;
+            const sTo = expectedMoveUci.slice(2, 4) as Square;
+            const sProm = expectedMoveUci.length > 4 ? expectedMoveUci[4] : undefined;
+            const sRes = stepChess.move({ from: sFrom, to: sTo, promotion: sProm });
+            if (sRes) {
+              stepBestSan = sRes.san;
+            }
+          } catch {
+            // fallback to UCI
+          }
+
+          setAlternativeContext({
+            fenBefore: currentFen,
+            expectedUci: expectedMoveUci,
+            bestSan: stepBestSan,
+            stepIndex: currentStep,
+            remainingMoves: solutionMoves.slice(currentStep),
+          });
+        }
+
         const newFen = testChess.fen();
         setCurrentFen(newFen);
         setChessInstance(testChess);
         setLastMove([orig, dest]);
         setShapes([]);
+        setUserSolvedFen(newFen);
+        setUserSolvedLastMove([orig, dest]);
 
         const nextStep = currentStep + 1;
         const maxPlies = Math.min(3, solutionMoves.length);
@@ -158,23 +221,26 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
                 } else {
                   sounds.play('move');
                 }
-                setCurrentFen(oppChess.fen());
+                const afterOppFen = oppChess.fen();
+                setCurrentFen(afterOppFen);
                 setChessInstance(oppChess);
                 setLastMove([oppFrom, oppTo]);
+                setUserSolvedFen(afterOppFen);
+                setUserSolvedLastMove([oppFrom, oppTo]);
                 setCurrentStep(nextStep + 1);
 
                 if (nextStep + 1 >= maxPlies) {
-                  finishPuzzleSuccess(valRes.is_best);
+                  finishPuzzleSuccess(valRes.is_best, valRes.explanation);
                 }
               } else {
-                finishPuzzleSuccess(valRes.is_best);
+                finishPuzzleSuccess(valRes.is_best, valRes.explanation);
               }
             } else {
-              finishPuzzleSuccess(valRes.is_best);
+              finishPuzzleSuccess(valRes.is_best, valRes.explanation);
             }
           }, 500);
         } else {
-          finishPuzzleSuccess(valRes.is_best);
+          finishPuzzleSuccess(valRes.is_best, valRes.explanation);
         }
       } else {
         // Invalid / blunder move
@@ -202,12 +268,22 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     }
   };
 
-  const handleSandboxMove = async (orig: string, dest: string, promotion = 'q') => {
+  const handleSandboxMove = async (orig: string, dest: string, promotion?: string) => {
+    let actualPromotion = promotion;
     const testChess = new Chess(currentFen);
+    const piece = testChess.get(orig as Square);
+    if (
+      !actualPromotion &&
+      piece?.type === 'p' &&
+      ((dest.endsWith('8') && piece.color === 'w') || (dest.endsWith('1') && piece.color === 'b'))
+    ) {
+      actualPromotion = 'q';
+    }
+
     const res = testChess.move({
       from: orig as Square,
       to: dest as Square,
-      promotion: promotion,
+      promotion: actualPromotion,
     });
     if (!res) return;
 
@@ -249,13 +325,17 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     }
   };
 
-  const finishPuzzleSuccess = (isBest = true) => {
+  const finishPuzzleSuccess = (isBest = true, customFeedback?: string) => {
     setStatus('correct');
     sounds.play('victory');
+    if (!isBest) {
+      setIsAlternativeSolution(true);
+    }
     setFeedbackMessage(
-      isBest
-        ? 'Brilliant! You found the winning continuation.'
-        : 'Good move! You found a sound, winning continuation.'
+      customFeedback ||
+        (isBest
+          ? 'Brilliant! You found the winning continuation.'
+          : alternativeExplanation || 'Good move! You found a sound, winning continuation.')
     );
 
     try {
@@ -272,6 +352,87 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       setSrsSaved(true);
       onSolved(puzzle.id, true);
     }
+  };
+
+  const handleShowBestMove = () => {
+    const context = alternativeContext || {
+      fenBefore: puzzle.initial_fen,
+      expectedUci: puzzle.best_move_uci,
+      bestSan: puzzle.best_move_san,
+      stepIndex: 0,
+      remainingMoves: solutionMoves,
+    };
+
+    setStatus('showing_best');
+    const demoChess = new Chess(context.fenBefore);
+
+    const bestFrom = context.expectedUci.slice(0, 2);
+    const bestTo = context.expectedUci.slice(2, 4);
+    const bestProm = context.expectedUci.length > 4 ? context.expectedUci[4] : undefined;
+
+    demoChess.move({
+      from: bestFrom as Square,
+      to: bestTo as Square,
+      promotion: bestProm,
+    });
+
+    setCurrentFen(demoChess.fen());
+    setLastMove([bestFrom, bestTo]);
+    setShapes([{ orig: bestFrom, dest: bestTo, brush: 'green' }]);
+    sounds.play('move');
+    setFeedbackMessage(
+      `Stockfish top choice: ${context.bestSan} (${context.expectedUci})`
+    );
+
+    const remaining = context.remainingMoves;
+    if (remaining.length > 1) {
+      setTimeout(() => {
+        try {
+          const oppReplyUci = remaining[1];
+          const oFrom = oppReplyUci.slice(0, 2);
+          const oTo = oppReplyUci.slice(2, 4);
+          const oProm = oppReplyUci.length > 4 ? oppReplyUci[4] : undefined;
+
+          const oppRes = demoChess.move({
+            from: oFrom as Square,
+            to: oTo as Square,
+            promotion: oProm,
+          });
+
+          if (oppRes) {
+            setCurrentFen(demoChess.fen());
+            setLastMove([oFrom, oTo]);
+            setShapes([
+              { orig: bestFrom, dest: bestTo, brush: 'green' },
+              { orig: oFrom, dest: oTo, brush: 'yellow' },
+            ]);
+            if (oppRes.captured) {
+              sounds.play('capture');
+            } else {
+              sounds.play('move');
+            }
+            setFeedbackMessage(
+              `Stockfish line: ${context.bestSan} ... (best continuation)`
+            );
+          }
+        } catch {
+          // ignore
+        }
+      }, 800);
+    }
+  };
+
+  const handleRestoreUserSolution = () => {
+    setStatus('correct');
+    if (userSolvedFen) {
+      setCurrentFen(userSolvedFen);
+      setChessInstance(new Chess(userSolvedFen));
+      setLastMove(userSolvedLastMove);
+      setShapes([]);
+    }
+    setFeedbackMessage(
+      alternativeExplanation || 'Good move! You found a sound, winning continuation.'
+    );
   };
 
   const handleShowHint = () => {
@@ -350,6 +511,11 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     setCurrentStep(0);
     setStatus('solving');
     setFeedbackMessage(null);
+    setIsAlternativeSolution(false);
+    setAlternativeExplanation(null);
+    setAlternativeContext(null);
+    setUserSolvedFen(null);
+    setUserSolvedLastMove(undefined);
   };
 
   const handleStartSandbox = () => {
@@ -463,7 +629,11 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
           {feedbackMessage && (
             <div className={`p-3 rounded-xl text-sm flex items-center gap-2.5 font-medium mb-3 transition-all ${
               status === 'correct'
-                ? 'bg-emerald-950/80 border border-emerald-700/60 text-emerald-200'
+                ? isAlternativeSolution
+                  ? 'bg-amber-950/70 border border-amber-600/50 text-amber-200'
+                  : 'bg-emerald-950/80 border border-emerald-700/60 text-emerald-200'
+                : status === 'showing_best'
+                ? 'bg-amber-950/70 border border-amber-600/60 text-amber-100'
                 : status === 'showing_blunder'
                 ? 'bg-rose-950/80 border border-rose-700/60 text-rose-200'
                 : status === 'sandbox'
@@ -473,7 +643,13 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
               {isValidatingMove ? (
                 <Loader2 className="w-5 h-5 text-emerald-400 animate-spin shrink-0" />
               ) : status === 'correct' ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                isAlternativeSolution ? (
+                  <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                )
+              ) : status === 'showing_best' ? (
+                <Award className="w-5 h-5 text-amber-400 shrink-0" />
               ) : status === 'showing_blunder' ? (
                 <Info className="w-5 h-5 text-rose-400 shrink-0" />
               ) : status === 'sandbox' ? (
@@ -489,7 +665,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
           <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800/80">
             <button
               onClick={handleShowHint}
-              disabled={status === 'correct' || hintLevel >= 3}
+              disabled={status === 'correct' || status === 'showing_best' || hintLevel >= 3}
               className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700/60"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -504,6 +680,27 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
               Why was my move bad?
             </button>
 
+            {/* Button to view best move when user played a good alternative move */}
+            {isAlternativeSolution && status !== 'showing_best' && (
+              <button
+                onClick={handleShowBestMove}
+                className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-xs font-semibold text-amber-300 transition-all border border-amber-500/40 hover:border-amber-400 shadow-sm"
+              >
+                <Award className="w-3.5 h-3.5 text-amber-400" />
+                <span>See Best Move ({alternativeContext?.bestSan || puzzle.best_move_san})</span>
+              </button>
+            )}
+
+            {status === 'showing_best' && (
+              <button
+                onClick={handleRestoreUserSolution}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-300 transition-colors border border-slate-700 shadow-sm"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Back to My Move</span>
+              </button>
+            )}
+
             {(status === 'showing_blunder' || status === 'sandbox') && (
               <button
                 onClick={handleResetPuzzle}
@@ -517,7 +714,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
         </div>
 
         {/* Spaced Repetition Rating Card when solved */}
-        {status === 'correct' && (
+        {(status === 'correct' || status === 'showing_best') && (
           <div className="bg-slate-900 border border-emerald-800/80 p-5 rounded-2xl shadow-xl animate-fade-in">
             <div className="flex items-center gap-2 mb-2 text-emerald-400 font-semibold text-sm">
               <Flame className="w-4 h-4" />

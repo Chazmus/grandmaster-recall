@@ -95,6 +95,26 @@ impl GameAnalyzer {
         black_player: &str,
         eval_depth: u32,
     ) -> Result<Vec<DetectedPuzzle>> {
+        self.analyze_game_blunders_throttled(
+            pgn,
+            target_username,
+            white_player,
+            black_player,
+            eval_depth,
+            0,
+        )
+        .await
+    }
+
+    pub async fn analyze_game_blunders_throttled(
+        &self,
+        pgn: &str,
+        target_username: &str,
+        white_player: &str,
+        black_player: &str,
+        eval_depth: u32,
+        sleep_ms: u64,
+    ) -> Result<Vec<DetectedPuzzle>> {
         let is_white = white_player.to_lowercase() == target_username.to_lowercase();
         let is_black = black_player.to_lowercase() == target_username.to_lowercase();
 
@@ -134,6 +154,16 @@ impl GameAnalyzer {
             let fen_before = Fen::from_position(pos.clone(), shakmaty::EnPassantMode::Legal).to_string();
 
             if is_user_turn && move_number >= 2 {
+                // Skip positions with 0 or 1 legal moves (forced moves/check evasions)
+                if pos.legal_moves().len() <= 1 {
+                    pos.play_unchecked(&played_move);
+                    continue;
+                }
+
+                if sleep_ms > 0 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms)).await;
+                }
+
                 let eval_before_res = match self.engine.evaluate_fen(&fen_before, eval_depth, 2).await {
                     Ok(r) => r,
                     Err(e) => {
@@ -149,6 +179,10 @@ impl GameAnalyzer {
                     let mut pos_after = pos.clone();
                     pos_after.play_unchecked(&played_move);
                     let fen_after = Fen::from_position(pos_after.clone(), shakmaty::EnPassantMode::Legal).to_string();
+
+                    if sleep_ms > 0 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms / 2)).await;
+                    }
 
                     let eval_after_res = match self.engine.evaluate_fen(&fen_after, eval_depth, 1).await {
                         Ok(r) => r,
@@ -242,6 +276,7 @@ impl GameAnalyzer {
         info!("Extracted {} blunder/mistake puzzles from game", detected_puzzles.len());
         Ok(detected_puzzles)
     }
+
 
     pub fn score_from_pov(score_cp: Option<i32>, mate_in: Option<i32>, is_active_player: bool) -> i32 {
         let raw = if let Some(m) = mate_in {

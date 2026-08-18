@@ -135,6 +135,37 @@ pub async fn update_user_last_synced(pool: &DbPool, user_id: i64) -> Result<()> 
     Ok(())
 }
 
+pub async fn get_all_users(pool: &DbPool) -> Result<Vec<User>> {
+    let users = sqlx::query_as::<_, User>(
+        "SELECT id, username, platform, last_synced_at, created_at FROM users ORDER BY id ASC"
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(users)
+}
+
+pub async fn count_due_puzzles(pool: &DbPool, user_id: i64) -> Result<i64> {
+    let now = Utc::now();
+    let row = sqlx::query(
+        "SELECT COUNT(*) as cnt FROM puzzle_reviews WHERE user_id = ? AND next_due_at <= ?"
+    )
+    .bind(user_id)
+    .bind(now)
+    .fetch_one(pool)
+    .await?;
+    let count: i64 = row.get("cnt");
+    Ok(count)
+}
+
+pub async fn count_total_puzzles(pool: &DbPool, user_id: i64) -> Result<i64> {
+    let row = sqlx::query("SELECT COUNT(*) as cnt FROM puzzles WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+    let count: i64 = row.get("cnt");
+    Ok(count)
+}
+
 pub async fn game_exists(pool: &DbPool, chess_com_id: &str) -> Result<bool> {
     let row = sqlx::query("SELECT COUNT(*) as cnt FROM games WHERE chess_com_id = ?")
         .bind(chess_com_id)
@@ -797,5 +828,13 @@ mod tests {
         assert_eq!(stats.total_puzzles, 1);
         assert_eq!(stats.blunders_count, 1);
         assert_eq!(stats.retention_rate, 100.0);
+
+        // Check get_all_users and count queries
+        let all_users = get_all_users(&pool).await.unwrap();
+        assert_eq!(all_users.len(), 1);
+        assert_eq!(all_users[0].username, "testuser");
+
+        let total_p = count_total_puzzles(&pool, user.id).await.unwrap();
+        assert_eq!(total_p, 1);
     }
 }

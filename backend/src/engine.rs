@@ -42,7 +42,7 @@ impl StockfishWorker {
 
         worker.send_command("uci").await?;
         worker.wait_for("uciok").await?;
-        worker.send_command("setoption name Threads value 4").await?;
+        worker.send_command("setoption name Threads value 2").await?;
         worker.send_command("setoption name Hash value 64").await?;
         worker.send_command("isready").await?;
         worker.wait_for("readyok").await?;

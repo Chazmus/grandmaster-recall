@@ -1,7 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use shakmaty::fen::Fen;
 use shakmaty::uci::UciMove;
-use shakmaty::{CastlingMode, Chess, Position};
+use shakmaty::{Chess, Position};
 use tracing::error;
 
 use crate::analyzer::GameAnalyzer;
@@ -32,24 +32,36 @@ pub async fn validate_move(
     let expected_best = payload.expected_best_uci.trim().to_lowercase();
     let is_white = payload.player_color.to_lowercase() == "white";
 
-    let mut pos: Chess = match payload.fen.parse::<Fen>() {
+    let pos: Chess = match payload.fen.parse::<Fen>() {
         Ok(f) => match f.into_position(shakmaty::CastlingMode::Standard) {
             Ok(p) => p,
-            Err(e) => return Err((StatusCode::BAD_REQUEST, format!("Invalid FEN: {:?}", e))),
+            Err(e) => {
+                error!("Invalid FEN position '{}': {:?}", payload.fen, e);
+                return Err((StatusCode::BAD_REQUEST, format!("Invalid FEN: {:?}", e)));
+            }
         },
-        Err(e) => return Err((StatusCode::BAD_REQUEST, format!("Invalid FEN format: {:?}", e))),
+        Err(e) => {
+            error!("Invalid FEN format '{}': {:?}", payload.fen, e);
+            return Err((StatusCode::BAD_REQUEST, format!("Invalid FEN format: {:?}", e)));
+        }
     };
 
     let move_parsed: shakmaty::Move = match clean_move.parse::<UciMove>() {
         Ok(u) => match u.to_move(&pos) {
             Ok(m) => m,
-            Err(e) => return Err((StatusCode::BAD_REQUEST, format!("Illegal move: {:?}", e))),
+            Err(e) => {
+                error!("Illegal move '{}' for FEN '{}': {:?}", clean_move, payload.fen, e);
+                return Err((StatusCode::BAD_REQUEST, format!("Illegal move: {:?}", e)));
+            }
         },
-        Err(e) => return Err((StatusCode::BAD_REQUEST, format!("Invalid UCI move: {:?}", e))),
+        Err(e) => {
+            error!("Invalid UCI move '{}': {:?}", clean_move, e);
+            return Err((StatusCode::BAD_REQUEST, format!("Invalid UCI move: {:?}", e)));
+        }
     };
 
     // If exact best move match
-    if clean_move == expected_best || clean_move.starts_with(&expected_best.chars().take(4).collect::<String>()) {
+    if clean_move == expected_best {
         let mut pos_after = pos.clone();
         pos_after.play_unchecked(&move_parsed);
         let fen_after = Fen::from_position(pos_after, shakmaty::EnPassantMode::Legal).to_string();
