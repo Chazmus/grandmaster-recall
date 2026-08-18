@@ -178,6 +178,13 @@ impl GameAnalyzer {
                 if !best_move_uci.is_empty() && best_move_uci != played_uci {
                     let mut pos_after = pos.clone();
                     pos_after.play_unchecked(&played_move);
+
+                    // Delivering checkmate can NEVER be a blunder or mistake!
+                    if pos_after.is_checkmate() {
+                        pos.play_unchecked(&played_move);
+                        continue;
+                    }
+
                     let fen_after = Fen::from_position(pos_after.clone(), shakmaty::EnPassantMode::Legal).to_string();
 
                     if sleep_ms > 0 {
@@ -192,17 +199,21 @@ impl GameAnalyzer {
                         }
                     };
 
-                    let eval_before_pov = Self::score_from_pov(
+                    let eval_before_pov = Self::score_from_side_to_move(
                         eval_before_res.score_cp,
                         eval_before_res.mate_in,
-                        user_color == Color::White,
                     );
 
-                    let eval_after_pov = Self::score_from_pov(
-                        eval_after_res.score_cp,
-                        eval_after_res.mate_in,
-                        user_color != Color::White,
-                    );
+                    let eval_after_pov = if pos_after.is_checkmate() {
+                        10000
+                    } else if pos_after.is_stalemate() || pos_after.is_insufficient_material() {
+                        0
+                    } else {
+                        -Self::score_from_side_to_move(
+                            eval_after_res.score_cp,
+                            eval_after_res.mate_in,
+                        )
+                    };
 
                     let eval_drop = eval_before_pov - eval_after_pov;
 
@@ -278,17 +289,22 @@ impl GameAnalyzer {
     }
 
 
-    pub fn score_from_pov(score_cp: Option<i32>, mate_in: Option<i32>, is_active_player: bool) -> i32 {
-        let raw = if let Some(m) = mate_in {
+    pub fn score_from_side_to_move(score_cp: Option<i32>, mate_in: Option<i32>) -> i32 {
+        if let Some(m) = mate_in {
             if m > 0 {
                 10000 - (m.abs() * 100)
-            } else {
+            } else if m < 0 {
                 -10000 + (m.abs() * 100)
+            } else {
+                -10000
             }
         } else {
             score_cp.unwrap_or(0)
-        };
+        }
+    }
 
+    pub fn score_from_pov(score_cp: Option<i32>, mate_in: Option<i32>, is_active_player: bool) -> i32 {
+        let raw = Self::score_from_side_to_move(score_cp, mate_in);
         if is_active_player {
             raw
         } else {
@@ -384,6 +400,14 @@ mod tests {
 
         let moves = GameAnalyzer::parse_pgn_moves(pgn);
         assert_eq!(moves, vec!["e4", "e5", "Nf3", "Nc6", "Bb5"]);
+    }
+
+    #[test]
+    fn test_score_from_side_to_move() {
+        assert_eq!(GameAnalyzer::score_from_side_to_move(Some(150), None), 150);
+        assert_eq!(GameAnalyzer::score_from_side_to_move(None, Some(1)), 9900);
+        assert_eq!(GameAnalyzer::score_from_side_to_move(None, Some(-1)), -9900);
+        assert_eq!(GameAnalyzer::score_from_side_to_move(None, Some(0)), -10000);
     }
 
     #[test]

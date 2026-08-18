@@ -30,7 +30,6 @@ pub async fn validate_move(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let clean_move = payload.move_uci.trim().to_lowercase();
     let expected_best = payload.expected_best_uci.trim().to_lowercase();
-    let is_white = payload.player_color.to_lowercase() == "white";
 
     let pos: Chess = match payload.fen.parse::<Fen>() {
         Ok(f) => match f.into_position(shakmaty::CastlingMode::Standard) {
@@ -91,24 +90,42 @@ pub async fn validate_move(
     // Play user move and evaluate position after
     let mut pos_after = pos.clone();
     pos_after.play_unchecked(&move_parsed);
-    let fen_after = Fen::from_position(pos_after, shakmaty::EnPassantMode::Legal).to_string();
+
+    // If user's move delivers checkmate, it is immediately valid and decisive!
+    if pos_after.is_checkmate() {
+        return Ok(Json(ValidateMoveResponse {
+            is_valid: true,
+            is_best: true,
+            eval_diff_cp: 0,
+            explanation: "Checkmate! Decisive tactical finish.".to_string(),
+            opponent_reply_uci: None,
+            best_move_uci: Some(clean_move),
+            continuation_uci: None,
+        }));
+    }
+
+    let fen_after = Fen::from_position(pos_after.clone(), shakmaty::EnPassantMode::Legal).to_string();
 
     let eval_after_res = match state.engine.evaluate_fen(&fen_after, 13, 1).await {
         Ok(r) => r,
         Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     };
 
-    let eval_before_pov = GameAnalyzer::score_from_pov(
+    let eval_before_pov = GameAnalyzer::score_from_side_to_move(
         eval_before_res.score_cp,
         eval_before_res.mate_in,
-        is_white,
     );
 
-    let eval_after_pov = GameAnalyzer::score_from_pov(
-        eval_after_res.score_cp,
-        eval_after_res.mate_in,
-        !is_white,
-    );
+    let eval_after_pov = if pos_after.is_checkmate() {
+        10000
+    } else if pos_after.is_stalemate() || pos_after.is_insufficient_material() {
+        0
+    } else {
+        -GameAnalyzer::score_from_side_to_move(
+            eval_after_res.score_cp,
+            eval_after_res.mate_in,
+        )
+    };
 
     let eval_diff = eval_before_pov - eval_after_pov;
 
