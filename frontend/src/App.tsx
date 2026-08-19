@@ -149,20 +149,44 @@ export function App() {
     setActiveTab('solver');
   };
 
-  const handlePuzzleSolved = async (_puzzleId: number, _success: boolean) => {
+  const handlePuzzleSolved = async (puzzleId: number, success: boolean) => {
+    // Immediately remove solved puzzle from due queue in local React state
+    setDuePuzzles((prev) => prev.filter((p) => p.puzzle.id !== puzzleId));
+
+    // Update solve count in allPuzzles if present
+    setAllPuzzles((prev) =>
+      prev.map((p) => {
+        if (p.puzzle.id === puzzleId) {
+          return {
+            ...p,
+            review: {
+              ...p.review,
+              times_solved: p.review.times_solved + (success ? 1 : 0),
+              times_failed: p.review.times_failed + (success ? 0 : 1),
+            },
+          };
+        }
+        return p;
+      })
+    );
+
     if (!user) return;
-    // Refresh stats in background
-    api.getStats(user.id).then(setStats).catch(console.error);
+    refreshUserDataQuietly(user.id);
   };
 
   const handleNextPuzzle = () => {
-    const nextIdx = puzzleQueueIndex + 1;
-    if (nextIdx < duePuzzles.length) {
+    const remainingDue = duePuzzles.filter((p) => p.puzzle.id !== currentPuzzle?.puzzle.id);
+    if (remainingDue.length > 0) {
+      setCurrentPuzzle(remainingDue[0]);
+      setPuzzleQueueIndex(0);
+      return;
+    }
+
+    const remainingAll = allPuzzles.filter((p) => p.puzzle.id !== currentPuzzle?.puzzle.id);
+    if (remainingAll.length > 0) {
+      const nextIdx = (puzzleQueueIndex + 1) % allPuzzles.length;
+      setCurrentPuzzle(allPuzzles[nextIdx] || remainingAll[0]);
       setPuzzleQueueIndex(nextIdx);
-      setCurrentPuzzle(duePuzzles[nextIdx]);
-    } else if (nextIdx < allPuzzles.length) {
-      setPuzzleQueueIndex(nextIdx);
-      setCurrentPuzzle(allPuzzles[nextIdx]);
     } else {
       // Completed review queue
       setActiveTab('review');
@@ -185,7 +209,12 @@ export function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500/30 selection:text-emerald-200">
       <Navbar
         currentTab={activeTab}
-        onTabChange={(tab) => setActiveTab(tab)}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          if (user) {
+            refreshUserDataQuietly(user.id);
+          }
+        }}
         onOpenSync={() => setIsSyncModalOpen(true)}
         username={username}
         onSwitchUser={handleSwitchUser}
@@ -216,7 +245,12 @@ export function App() {
               <div className="space-y-4">
                 <div className="max-w-7xl mx-auto px-4 pt-4">
                   <button
-                    onClick={() => setActiveTab('review')}
+                    onClick={() => {
+                      setActiveTab('review');
+                      if (user) {
+                        refreshUserDataQuietly(user.id);
+                      }
+                    }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-xs font-semibold text-slate-300 border border-slate-800 transition-colors"
                   >
                     <ArrowLeft className="w-4 h-4" />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Chess, Square } from 'chess.js';
 import confetti from 'canvas-confetti';
 import {
@@ -88,8 +88,56 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   const [userSolvedFen, setUserSolvedFen] = useState<string | null>(null);
   const [userSolvedLastMove, setUserSolvedLastMove] = useState<[string, string] | undefined>();
 
+  const srsSubmittedRef = useRef<boolean>(false);
+  const isSolvedRef = useRef<boolean>(false);
+  isSolvedRef.current = status === 'correct' || status === 'showing_best' || userSolvedFen !== null;
+
+  const submitSolveAttempt = useCallback(
+    async (explicitQuality?: number) => {
+      if (srsSubmittedRef.current) return;
+      srsSubmittedRef.current = true;
+      setSrsSaved(true);
+
+      const isSuccess = explicitQuality !== undefined ? explicitQuality >= 3 : true;
+      try {
+        await api.submitSolve(puzzle.id, {
+          user_id: userId,
+          success: isSuccess,
+          hints_used: hintLevel,
+          time_taken_ms: Date.now() - startTime,
+          quality: explicitQuality,
+        });
+        onSolved(puzzle.id, isSuccess, explicitQuality);
+      } catch (err) {
+        console.error('Failed to submit solve attempt:', err);
+      }
+    },
+    [puzzle.id, userId, hintLevel, startTime, onSolved]
+  );
+
+  // Auto-submit solve attempt on unmount if user solved the puzzle and navigated away without rating
+  useEffect(() => {
+    return () => {
+      if (isSolvedRef.current && !srsSubmittedRef.current) {
+        srsSubmittedRef.current = true;
+        api
+          .submitSolve(puzzle.id, {
+            user_id: userId,
+            success: true,
+            hints_used: hintLevel,
+            time_taken_ms: Date.now() - startTime,
+          })
+          .then(() => {
+            onSolved(puzzle.id, true);
+          })
+          .catch(console.error);
+      }
+    };
+  }, [puzzle.id, userId, hintLevel, startTime, onSolved]);
+
   // Parse PV lines & cap to max 3 plies
   useEffect(() => {
+    srsSubmittedRef.current = false;
     try {
       const parsedCont: string[] = JSON.parse(puzzle.continuation_uci || '[]');
       if (parsedCont.length > 0) {
@@ -783,13 +831,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   const handleSrsRating = async (quality: number) => {
     setIsSubmitting(true);
     try {
-      await api.submitSolve(puzzle.id, {
-        user_id: userId,
-        success: quality >= 3,
-        hints_used: hintLevel,
-        time_taken_ms: Date.now() - startTime,
-        quality,
-      });
+      await submitSolveAttempt(quality);
       if (onNext) {
         onNext();
       }
@@ -1067,7 +1109,12 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
 
               {onNext && (
                 <button
-                  onClick={onNext}
+                  onClick={async () => {
+                    if (!srsSubmittedRef.current) {
+                      await submitSolveAttempt();
+                    }
+                    onNext();
+                  }}
                   className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg shadow-emerald-900/40 transition-colors"
                 >
                   <span>Next Puzzle</span>

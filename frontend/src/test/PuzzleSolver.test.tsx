@@ -6,7 +6,7 @@ import { PuzzleWithReview } from '../types';
 vi.mock('../api/client', () => ({
   api: {
     validateMove: vi.fn(),
-    submitSolveAttempt: vi.fn().mockResolvedValue({
+    submitSolve: vi.fn().mockResolvedValue({
       puzzle_id: 42,
       success: true,
       new_easiness_factor: 2.5,
