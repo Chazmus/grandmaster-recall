@@ -7,6 +7,7 @@ import {
   Volume2,
   VolumeX,
   Loader2,
+  Bug,
 } from 'lucide-react';
 import { sounds } from '../utils/sound';
 import { SyncStatus } from '../types';
@@ -140,6 +141,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
           </button>
 
+          {/* Report an Issue Button */}
+          <a
+            href="https://github.com/Chazmus/grandmaster-recall/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Report an Issue on GitHub"
+            className="p-2 rounded-xl text-slate-400 hover:text-rose-300 hover:bg-slate-900 border border-slate-800/80 transition-colors flex items-center justify-center"
+          >
+            <Bug className="w-4 h-4 text-rose-400" />
+          </a>
+
           {/* Import Games Button */}
           <button
             onClick={onOpenSync}
@@ -180,6 +192,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                     Switch Player
                   </button>
                 </form>
+
+                <div className="pt-3 mt-3 border-t border-slate-800">
+                  <a
+                    href="https://github.com/Chazmus/grandmaster-recall/issues"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-rose-300 text-xs font-medium border border-slate-800 transition-colors"
+                  >
+                    <Bug className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Report an Issue</span>
+                  </a>
+                </div>
               </div>
             )}
           </div>

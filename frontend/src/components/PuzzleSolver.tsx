@@ -15,6 +15,7 @@ import {
   Loader2,
   Award,
   Undo2,
+  Bug,
 } from 'lucide-react';
 
 import { PuzzleWithReview } from '../types';
@@ -990,6 +991,19 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
                 Back to Puzzle
               </button>
             )}
+          </div>
+
+          {/* Report an Issue Link */}
+          <div className="mt-3 pt-3 border-t border-slate-800/80 flex justify-end">
+            <a
+              href={`https://github.com/Chazmus/grandmaster-recall/issues/new?title=${encodeURIComponent(`[Puzzle #${puzzle.id}] Issue with puzzle`)}&body=${encodeURIComponent(`### Puzzle Details\n- **Puzzle ID:** ${puzzle.id}\n- **Opening:** ${puzzle.opening_name || 'N/A'}\n- **Move Number:** ${puzzle.move_number}\n- **FEN:** \`${currentFen}\`\n\n### Issue Description\n`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-rose-400 transition-colors"
+            >
+              <Bug className="w-3 h-3 text-rose-400/80" />
+              <span>Report an issue with this puzzle</span>
+            </a>
           </div>
         </div>
 
