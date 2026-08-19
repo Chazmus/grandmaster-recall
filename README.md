@@ -31,12 +31,40 @@ An intelligent chess training web application that connects to your **Chess.com*
 
 ## 🚀 Quick Start
 
-### 1. Start Both Backend & Frontend:
+### Option 1: Run with Docker (Fastest & Recommended)
+
+Pre-built multi-architecture images (`linux/amd64` and `linux/arm64` / Raspberry Pi / Apple Silicon) are automatically published to the GitHub Container Registry.
+
+#### Using Docker Compose:
+```bash
+docker compose up -d
+```
+
+#### Or with `docker run`:
+```bash
+docker run -d \
+  --name grandmaster-recall \
+  -p 3001:3001 \
+  -v $(pwd)/data:/app/data \
+  --restart unless-stopped \
+  ghcr.io/chazmus/grandmaster-recall:latest
+```
+
+- **Web App & API**: Open [http://localhost:3001](http://localhost:3001) in your browser.
+- **Data Persistence**: Your SQLite puzzle history and review schedules will be saved in `./data/chess_trainer.db`.
+
+---
+
+### Option 2: Run from Source (Development Mode)
+
+Prerequisites: Rust (`cargo`), Node.js (`npm`), and `curl`.
+
 ```bash
 ./start.sh
 ```
 
-- **Web App**: [http://localhost:5173](http://localhost:5173)
+- Automatically downloads the appropriate Stockfish 17+ binary for your architecture (`arm64` or `x86_64`).
+- **Frontend (Vite HMR)**: [http://localhost:5173](http://localhost:5173)
 - **Backend API**: [http://localhost:3001/api](http://localhost:3001/api)
 
 ---
