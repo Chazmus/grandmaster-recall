@@ -211,10 +211,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_stockfish_engine_evaluation() {
-        let path = PathBuf::from("/home/cbailey/workspace/chess-trainer/engine/stockfish/stockfish-linux-x86-64-universal");
-        if !path.exists() {
-            return;
+        let mut possible_paths = Vec::new();
+        if let Ok(env_path) = std::env::var("STOCKFISH_PATH") {
+            possible_paths.push(PathBuf::from(env_path));
         }
+        possible_paths.extend(vec![
+            PathBuf::from("../engine/stockfish/stockfish-linux-arm64-universal"),
+            PathBuf::from("./engine/stockfish/stockfish-linux-arm64-universal"),
+            PathBuf::from("../engine/stockfish/stockfish-linux-x86-64-universal"),
+            PathBuf::from("./engine/stockfish/stockfish-linux-x86-64-universal"),
+            PathBuf::from("/home/cbailey/grandmaster-recall/engine/stockfish/stockfish-linux-arm64-universal"),
+            PathBuf::from("/home/cbailey/grandmaster-recall/engine/stockfish/stockfish-linux-x86-64-universal"),
+            PathBuf::from("/home/cbailey/workspace/chess-trainer/engine/stockfish/stockfish-linux-x86-64-universal"),
+            PathBuf::from("/usr/bin/stockfish"),
+            PathBuf::from("/usr/local/bin/stockfish"),
+        ]);
+
+        let path = match possible_paths.into_iter().find(|p| p.exists()) {
+            Some(p) => p,
+            None => return,
+        };
 
         let engine = EnginePool::new(path).await.unwrap();
         // Scholar's mate threat test FEN: White to move, Qxf7# is mate in 1

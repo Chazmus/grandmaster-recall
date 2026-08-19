@@ -1,0 +1,16 @@
+services:
+  grandmaster-recall:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: grandmaster-recall:latest
+    container_name: grandmaster-recall
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    networks:
+      - proxy-net
+
+networks:
+  proxy-net:
+    external: true

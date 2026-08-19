@@ -5,6 +5,7 @@
 Cargo.lock
 
 # Database & runtime data
+/data/
 /backend/data/*.db*
 *.sqlite
 *.sqlite3

@@ -13,13 +13,19 @@ mkdir -p "$PROJECT_DIR/backend/data"
 
 # Auto-download Stockfish binary if not present
 ENGINE_DIR="$PROJECT_DIR/engine"
-STOCKFISH_BIN="$ENGINE_DIR/stockfish/stockfish-linux-x86-64-universal"
+ARCH="$(uname -m)"
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    SF_ARCH="arm64"
+else
+    SF_ARCH="x86-64"
+fi
+STOCKFISH_BIN="$ENGINE_DIR/stockfish/stockfish-linux-${SF_ARCH}-universal"
 
 if [ ! -f "$STOCKFISH_BIN" ]; then
-    echo "-> Stockfish binary not found. Downloading Stockfish for Linux x86_64..."
+    echo "-> Stockfish binary not found. Downloading Stockfish for Linux ${SF_ARCH}..."
     mkdir -p "$ENGINE_DIR"
     cd "$ENGINE_DIR"
-    curl -L -o stockfish.tar.gz "https://github.com/official-stockfish/Stockfish/releases/download/stockfish-dev-20260810-5062aee5/stockfish-linux-x86-64-universal.tar.gz"
+    curl -L -o stockfish.tar.gz "https://github.com/official-stockfish/Stockfish/releases/download/stockfish-dev-20260810-5062aee5/stockfish-linux-${SF_ARCH}-universal.tar.gz"
     tar -xzf stockfish.tar.gz
     rm -f stockfish.tar.gz
     chmod +x "$STOCKFISH_BIN"
