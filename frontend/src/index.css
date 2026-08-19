@@ -144,9 +144,14 @@ coords {
 coords.ranks {
   right: 4px;
   top: 0;
-  flex-direction: column;
+  flex-direction: column-reverse;
   height: 100%;
   width: 14px;
+}
+
+coords.ranks.black,
+.orientation-black coords.ranks {
+  flex-direction: column;
 }
 
 coords.files {
@@ -155,6 +160,26 @@ coords.files {
   flex-direction: row;
   width: 100%;
   height: 14px;
+}
+
+coords.files.black,
+.orientation-black coords.files {
+  flex-direction: row-reverse;
+}
+
+coords.squares {
+  bottom: 0;
+  left: 0;
+  text-transform: uppercase;
+  text-align: right;
+  flex-direction: column-reverse;
+  height: 100%;
+  width: 12.5%;
+}
+
+coords.squares.black,
+.orientation-black coords.squares {
+  flex-direction: column;
 }
 
 coords coord {
