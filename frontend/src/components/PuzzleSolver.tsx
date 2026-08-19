@@ -79,6 +79,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isValidatingMove, setIsValidatingMove] = useState<boolean>(false);
+  const [isEngineThinking, setIsEngineThinking] = useState<boolean>(false);
   const [srsSaved, setSrsSaved] = useState<boolean>(false);
 
   // Alternative good-move tracking
@@ -89,6 +90,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   const [userSolvedLastMove, setUserSolvedLastMove] = useState<[string, string] | undefined>();
 
   const srsSubmittedRef = useRef<boolean>(false);
+  const sandboxActiveRef = useRef<boolean>(false);
   const isSolvedRef = useRef<boolean>(false);
   isSolvedRef.current = status === 'correct' || status === 'showing_best' || userSolvedFen !== null;
 
@@ -138,6 +140,8 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   // Parse PV lines & cap to max 3 plies
   useEffect(() => {
     srsSubmittedRef.current = false;
+    sandboxActiveRef.current = false;
+    setIsEngineThinking(false);
     try {
       const parsedCont: string[] = JSON.parse(puzzle.continuation_uci || '[]');
       if (parsedCont.length > 0) {
@@ -393,7 +397,68 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     }
   };
 
+  const triggerEngineSandboxReply = async (fen: string) => {
+    setIsEngineThinking(true);
+    setFeedbackMessage('Stockfish is thinking...');
+
+    try {
+      const evalRes = await api.evaluatePosition(fen, 12, 1);
+      if (!sandboxActiveRef.current) return;
+
+      if (evalRes.best_move && evalRes.best_move.length >= 4) {
+        const oppFrom = evalRes.best_move.slice(0, 2);
+        const oppTo = evalRes.best_move.slice(2, 4);
+        const oppProm = evalRes.best_move.length > 4 ? evalRes.best_move[4] : undefined;
+
+        const oppChess = new Chess(fen);
+        const oppMoveResult = oppChess.move({
+          from: oppFrom as Square,
+          to: oppTo as Square,
+          promotion: oppProm,
+        });
+
+        if (oppMoveResult) {
+          if (oppChess.isCheckmate()) {
+            sounds.play('checkmate');
+          } else if (oppChess.inCheck()) {
+            sounds.play('check');
+          } else if (oppMoveResult.captured) {
+            sounds.play('capture');
+          } else {
+            sounds.play('move');
+          }
+
+          const nextFen = oppChess.fen();
+          setCurrentFen(nextFen);
+          setChessInstance(oppChess);
+          setLastMove([oppFrom, oppTo]);
+
+          if (oppChess.isCheckmate()) {
+            setFeedbackMessage('Checkmate! Stockfish wins.');
+          } else if (oppChess.isDraw()) {
+            setFeedbackMessage('Game drawn.');
+          } else {
+            setFeedbackMessage('Freeplay Mode: Your turn vs Stockfish!');
+          }
+        } else {
+          setFeedbackMessage('Freeplay Mode: Your turn vs Stockfish!');
+        }
+      } else {
+        setFeedbackMessage('Freeplay Mode: Your turn vs Stockfish!');
+      }
+    } catch (err) {
+      console.error('Engine evaluation failed in freeplay mode:', err);
+      if (sandboxActiveRef.current) {
+        setFeedbackMessage('Freeplay Mode: Stockfish evaluation failed.');
+      }
+    } finally {
+      setIsEngineThinking(false);
+    }
+  };
+
   const handleSandboxMove = async (orig: string, dest: string, promotion?: string) => {
+    if (isEngineThinking) return;
+
     let actualPromotion = promotion;
     const testChess = new Chess(currentFen);
     const piece = testChess.get(orig as Square);
@@ -416,61 +481,38 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       return;
     }
 
-    setHistory((prev) => [
-      ...prev,
-      {
-        fen: currentFen,
-        lastMove,
-        stepIndex: currentStep,
-        shapes,
-        feedbackMessage,
-        status,
-        isAlternativeSolution,
-        alternativeExplanation,
-        alternativeContext,
-      },
-    ]);
+    const preMoveSnapshot: BoardSnapshot = {
+      fen: currentFen,
+      lastMove,
+      stepIndex: currentStep,
+      shapes,
+      feedbackMessage,
+      status,
+      isAlternativeSolution,
+      alternativeExplanation,
+      alternativeContext,
+    };
+    setHistory((prev) => [...prev, preMoveSnapshot]);
 
     const newFen = testChess.fen();
     setCurrentFen(newFen);
     setChessInstance(testChess);
     setLastMove([orig, dest]);
 
-    // Engine reply
-    try {
-      const evalRes = await api.evaluatePosition(newFen, 12, 1);
-      if (evalRes.best_move && evalRes.best_move.length >= 4) {
-        setTimeout(() => {
-          const oppFrom = evalRes.best_move.slice(0, 2);
-          const oppTo = evalRes.best_move.slice(2, 4);
-          const oppProm = evalRes.best_move.length > 4 ? evalRes.best_move[4] : undefined;
-
-          try {
-            const oppChess = new Chess(newFen);
-            const oppMoveResult = oppChess.move({
-              from: oppFrom as Square,
-              to: oppTo as Square,
-              promotion: oppProm,
-            });
-
-            if (oppMoveResult) {
-              if (oppMoveResult.captured) {
-                sounds.play('capture');
-              } else {
-                sounds.play('move');
-              }
-              setCurrentFen(oppChess.fen());
-              setChessInstance(oppChess);
-              setLastMove([oppFrom, oppTo]);
-            }
-          } catch {
-            // ignore
-          }
-        }, 400);
-      }
-    } catch {
-      // ignore
+    if (testChess.isCheckmate()) {
+      sounds.play('checkmate');
+      setFeedbackMessage('Checkmate! You won against Stockfish!');
+      return;
+    } else if (testChess.inCheck()) {
+      sounds.play('check');
     }
+
+    if (testChess.isDraw()) {
+      setFeedbackMessage('Game drawn.');
+      return;
+    }
+
+    await triggerEngineSandboxReply(newFen);
   };
 
   const finishPuzzleSuccess = (isBest = true, customFeedback?: string) => {
@@ -606,6 +648,8 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   };
 
   const handleRestoreUserSolution = () => {
+    sandboxActiveRef.current = false;
+    setIsEngineThinking(false);
     setStatus('correct');
     if (userSolvedFen) {
       setCurrentFen(userSolvedFen);
@@ -744,6 +788,8 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
   };
 
   const handleResetPuzzle = () => {
+    sandboxActiveRef.current = false;
+    setIsEngineThinking(false);
     const initialChess = new Chess(puzzle.initial_fen);
     setChessInstance(initialChess);
     setCurrentFen(puzzle.initial_fen);
@@ -816,16 +862,45 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
         ? null
         : targetState.feedbackMessage || `Stepped back to Ply ${targetState.stepIndex}.`
     );
-    setStatus(targetState.status === 'correct' ? 'solving' : targetState.status);
+    if (targetState.status === 'sandbox') {
+      sandboxActiveRef.current = true;
+      setStatus('sandbox');
+      setFeedbackMessage('Freeplay Mode: Your turn vs Stockfish!');
+    } else {
+      sandboxActiveRef.current = false;
+      setStatus(targetState.status === 'correct' ? 'solving' : targetState.status);
+    }
     setIsAlternativeSolution(targetState.isAlternativeSolution);
     setAlternativeExplanation(targetState.alternativeExplanation);
     setAlternativeContext(targetState.alternativeContext);
     sounds.play('move');
   };
 
-  const handleStartSandbox = () => {
+  const handleStartSandbox = async () => {
+    sandboxActiveRef.current = true;
     setStatus('sandbox');
-    setFeedbackMessage('Freeplay Mode: Play out any moves against Stockfish!');
+    setShapes([]);
+
+    const currentChess = new Chess(currentFen);
+    setChessInstance(currentChess);
+
+    const currentTurn = currentChess.turn();
+    const userTurn = puzzle.player_color === 'white' ? 'w' : 'b';
+
+    if (currentChess.isGameOver()) {
+      if (currentChess.isCheckmate()) {
+        setFeedbackMessage('Checkmate! The game is already over.');
+      } else {
+        setFeedbackMessage('Draw / Game is already over.');
+      }
+      return;
+    }
+
+    if (currentTurn !== userTurn) {
+      await triggerEngineSandboxReply(currentFen);
+    } else {
+      setFeedbackMessage('Freeplay Mode: Your turn vs Stockfish!');
+    }
   };
 
   const handleSrsRating = async (quality: number) => {
@@ -871,7 +946,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
           orientation={puzzle.player_color}
           lastMove={lastMove}
           shapes={shapes}
-          canMove={status === 'solving' || status === 'sandbox'}
+          canMove={(status === 'solving' || status === 'sandbox') && !isEngineThinking && !isValidatingMove}
           onMove={handleMove}
         />
 
@@ -886,9 +961,9 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
             {canStepBack && (
               <button
                 onClick={handleStepBack}
-                disabled={isValidatingMove}
+                disabled={isValidatingMove || isEngineThinking}
                 title="Go back to previous move / retry"
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-medium border border-slate-700 transition-all active:scale-95 shadow-sm"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-medium border border-slate-700 transition-all active:scale-95 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Undo2 className="w-3 h-3 text-blue-400" />
                 <span>Undo</span>
@@ -950,8 +1025,8 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
                 ? 'bg-indigo-950/80 border border-indigo-700/60 text-indigo-200'
                 : 'bg-slate-800/90 border border-slate-700 text-slate-200'
             }`}>
-              {isValidatingMove ? (
-                <Loader2 className="w-5 h-5 text-emerald-400 animate-spin shrink-0" />
+              {isValidatingMove || isEngineThinking ? (
+                <Loader2 className="w-5 h-5 text-indigo-400 animate-spin shrink-0" />
               ) : status === 'correct' ? (
                 isAlternativeSolution ? (
                   <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
@@ -977,7 +1052,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
             {canStepBack && (
               <button
                 onClick={handleStepBack}
-                disabled={isValidatingMove}
+                disabled={isValidatingMove || isEngineThinking}
                 title="Step backwards to previous move / ply"
                 className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700/60 shadow-sm"
               >
@@ -988,7 +1063,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
 
             <button
               onClick={handleShowHint}
-              disabled={status === 'correct' || status === 'showing_best' || hintLevel >= 3}
+              disabled={status === 'correct' || status === 'showing_best' || status === 'sandbox' || hintLevel >= 3 || isEngineThinking}
               className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700/60"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -997,7 +1072,8 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
 
             <button
               onClick={handleShowBlunderPunishment}
-              className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-xs font-semibold text-rose-300 transition-colors border border-rose-800/50"
+              disabled={status === 'sandbox' || status === 'showing_best' || isValidatingMove || isEngineThinking}
+              className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-xs font-semibold text-rose-300 transition-colors border border-rose-800/50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Eye className="w-3.5 h-3.5 text-rose-400" />
               Why was my move bad?
@@ -1007,7 +1083,8 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
             {isAlternativeSolution && status !== 'showing_best' && (
               <button
                 onClick={handleShowBestMove}
-                className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-xs font-semibold text-amber-300 transition-all border border-amber-500/40 hover:border-amber-400 shadow-sm"
+                disabled={isEngineThinking}
+                className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-xs font-semibold text-amber-300 transition-all border border-amber-500/40 hover:border-amber-400 shadow-sm disabled:opacity-40"
               >
                 <Award className="w-3.5 h-3.5 text-amber-400" />
                 <span>See Best Move ({alternativeContext?.bestSan || puzzle.best_move_san})</span>
@@ -1027,10 +1104,27 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
             {(status === 'showing_blunder' || status === 'sandbox') && (
               <button
                 onClick={handleResetPuzzle}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors border border-slate-700"
+                disabled={isEngineThinking}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors border border-slate-700 disabled:opacity-50"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Back to Puzzle
+              </button>
+            )}
+
+            {status === 'sandbox' && onNext && (
+              <button
+                onClick={async () => {
+                  if (!srsSubmittedRef.current) {
+                    await submitSolveAttempt();
+                  }
+                  onNext();
+                }}
+                disabled={isEngineThinking}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-900/40 transition-colors disabled:opacity-50"
+              >
+                <span>Next Puzzle</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
