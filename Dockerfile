@@ -13,7 +13,7 @@ RUN npm run build
 # ------------------------------------------------------------------------------
 # Stage 2: Build Rust Backend & Prepare Stockfish Engine
 # ------------------------------------------------------------------------------
-FROM rust:1.85-bookworm AS backend-builder
+FROM rust:bookworm AS backend-builder
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
