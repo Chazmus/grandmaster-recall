@@ -287,6 +287,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
                   setUserSolvedFen(afterOppFen);
                   setUserSolvedLastMove([oppFrom, oppTo]);
                   setCurrentStep(nextStep + 1);
+                  setHintLevel(0);
 
                   const afterOppSnapshot: BoardSnapshot = {
                     fen: afterOppFen,
@@ -568,11 +569,59 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     );
   };
 
-  const handleShowHint = () => {
+  const handleShowHint = async () => {
     const nextHint = hintLevel + 1;
     setHintLevel(nextHint);
 
-    const targetUci = solutionMoves[currentStep] || puzzle.best_move_uci;
+    let targetUci = solutionMoves[currentStep];
+    let currentBestSan = '';
+
+    if (targetUci && targetUci.length >= 4) {
+      try {
+        const testChess = new Chess(currentFen);
+        const sFrom = targetUci.slice(0, 2) as Square;
+        const sTo = targetUci.slice(2, 4) as Square;
+        const sProm = targetUci.length > 4 ? targetUci[4] : undefined;
+        const mRes = testChess.move({ from: sFrom, to: sTo, promotion: sProm });
+        if (mRes) {
+          currentBestSan = mRes.san;
+        } else {
+          targetUci = undefined as any;
+        }
+      } catch {
+        targetUci = undefined as any;
+      }
+    }
+
+    if (!targetUci || !currentBestSan) {
+      if (currentStep === 0) {
+        targetUci = puzzle.best_move_uci;
+        currentBestSan = puzzle.best_move_san;
+      } else {
+        try {
+          const evalRes = await api.evaluatePosition(currentFen, 12, 1);
+          if (evalRes.best_move && evalRes.best_move.length >= 4) {
+            targetUci = evalRes.best_move;
+            const testChess = new Chess(currentFen);
+            const sFrom = targetUci.slice(0, 2) as Square;
+            const sTo = targetUci.slice(2, 4) as Square;
+            const sProm = targetUci.length > 4 ? targetUci[4] : undefined;
+            const mRes = testChess.move({ from: sFrom, to: sTo, promotion: sProm });
+            if (mRes) {
+              currentBestSan = mRes.san;
+            }
+          }
+        } catch (err) {
+          console.error('Failed to get hint evaluation:', err);
+        }
+      }
+    }
+
+    if (!targetUci || targetUci.length < 4) {
+      targetUci = puzzle.best_move_uci;
+      currentBestSan = puzzle.best_move_san;
+    }
+
     const fromSq = targetUci.slice(0, 2);
     const toSq = targetUci.slice(2, 4);
 
@@ -584,7 +633,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
       setFeedbackMessage(`Hint: Move from ${fromSq.toUpperCase()} to ${toSq.toUpperCase()}.`);
     } else {
       setShapes([{ orig: fromSq, dest: toSq, brush: 'green' }]);
-      setFeedbackMessage(`Best move: ${puzzle.best_move_san}`);
+      setFeedbackMessage(`Best move: ${currentBestSan || targetUci}`);
     }
   };
 
@@ -711,6 +760,7 @@ export const PuzzleSolver: React.FC<PuzzleSolverProps> = ({
     setChessInstance(new Chess(targetState.fen));
     setLastMove(targetState.lastMove);
     setCurrentStep(targetState.stepIndex);
+    setHintLevel(0);
     setShapes(targetState.shapes);
     setFeedbackMessage(
       targetState.stepIndex === 0

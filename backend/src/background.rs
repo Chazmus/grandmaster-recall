@@ -11,7 +11,7 @@ use crate::routes::sync::AppState;
 pub const LOW_WATERMARK: i64 = 8;
 pub const HIGH_WATERMARK: i64 = 16;
 pub const DAEMON_INTERVAL_SECS: u64 = 15 * 60; // 15 minutes
-pub const THROTTLE_SLEEP_MS: u64 = 100; // 100ms cooldown between move evaluations to keep CPU cool
+pub const THROTTLE_SLEEP_MS: u64 = 25; // 25ms cooldown between move evaluations to keep CPU responsive
 pub const BACKGROUND_EVAL_DEPTH: u32 = 16; // High depth analysis for strong tactical accuracy on Pi 5
 
 pub async fn run_background_puzzle_daemon(state: AppState) {

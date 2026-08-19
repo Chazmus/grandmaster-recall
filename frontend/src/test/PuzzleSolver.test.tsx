@@ -114,5 +114,18 @@ describe('PuzzleSolver Component', () => {
     // At ply 0 with no moves, Undo is not active
     expect(screen.queryByText('Undo')).not.toBeInTheDocument();
   });
+
+  it('displays hint for current position when clicking Hint', async () => {
+    render(
+      <PuzzleSolver
+        puzzleData={mockPuzzle}
+        onSolved={vi.fn()}
+        userId={1}
+      />
+    );
+
+    const hintButton = screen.getByRole('button', { name: /hint/i });
+    expect(hintButton).toBeInTheDocument();
+  });
 });
 

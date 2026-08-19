@@ -42,8 +42,8 @@ impl StockfishWorker {
 
         worker.send_command("uci").await?;
         worker.wait_for("uciok").await?;
-        worker.send_command("setoption name Threads value 2").await?;
-        worker.send_command("setoption name Hash value 64").await?;
+        worker.send_command("setoption name Threads value 3").await?;
+        worker.send_command("setoption name Hash value 128").await?;
         worker.send_command("isready").await?;
         worker.wait_for("readyok").await?;
 
@@ -76,16 +76,19 @@ impl StockfishWorker {
         Ok(lines)
     }
 
+    async fn reset_game_internal(&mut self) -> Result<()> {
+        self.send_command("ucinewgame").await?;
+        self.send_command("isready").await?;
+        self.wait_for("readyok").await?;
+        Ok(())
+    }
+
     async fn evaluate_fen_internal(
         &mut self,
         fen: &str,
         depth: u32,
         multi_pv: u32,
     ) -> Result<EngineEvalResponse> {
-        self.send_command("ucinewgame").await?;
-        self.send_command("isready").await?;
-        self.wait_for("readyok").await?;
-
         self.send_command(&format!("setoption name MultiPV value {}", multi_pv)).await?;
         self.send_command(&format!("position fen {}", fen)).await?;
         self.send_command(&format!("go depth {}", depth)).await?;
@@ -192,6 +195,11 @@ impl EnginePool {
         Ok(Self {
             inner: Arc::new(Mutex::new(worker)),
         })
+    }
+
+    pub async fn reset_game(&self) -> Result<()> {
+        let mut worker = self.inner.lock().await;
+        worker.reset_game_internal().await
     }
 
     pub async fn evaluate_fen(

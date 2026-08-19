@@ -126,6 +126,9 @@ impl GameAnalyzer {
         let opening = Self::extract_opening(pgn);
         let san_tokens = Self::parse_pgn_moves(pgn);
 
+        // Reset game state once at the start of the game analysis to clean TT cache
+        let _ = self.engine.reset_game().await;
+
         let mut pos = Chess::default();
         let mut detected_puzzles = Vec::new();
 
@@ -164,7 +167,7 @@ impl GameAnalyzer {
                     tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms)).await;
                 }
 
-                let eval_before_res = match self.engine.evaluate_fen(&fen_before, eval_depth, 2).await {
+                let eval_before_res = match self.engine.evaluate_fen(&fen_before, eval_depth, 1).await {
                     Ok(r) => r,
                     Err(e) => {
                         warn!("Stockfish eval error on FEN {}: {:?}", fen_before, e);
