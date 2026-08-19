@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { PuzzleSolver } from '../components/PuzzleSolver';
 import { PuzzleWithReview } from '../types';
-import { api } from '../api/client';
 
 vi.mock('../api/client', () => ({
   api: {
