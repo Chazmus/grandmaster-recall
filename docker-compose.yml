@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: grandmaster-recall:latest
+    image: ghcr.io/chazmus/grandmaster-recall:latest
     container_name: grandmaster-recall
     restart: unless-stopped
     volumes:
