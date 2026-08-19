@@ -9,8 +9,9 @@ import {
   RotateCcw,
   Sparkles,
   TrendingUp,
+  Loader2,
 } from 'lucide-react';
-import { PuzzleWithReview, StatsSummary } from '../types';
+import { PuzzleWithReview, StatsSummary, SyncStatus } from '../types';
 
 interface ReviewQueueProps {
   duePuzzles: PuzzleWithReview[];
@@ -19,6 +20,7 @@ interface ReviewQueueProps {
   onSelectPuzzle: (puzzle: PuzzleWithReview) => void;
   onOpenSync: () => void;
   username: string;
+  syncStatus?: SyncStatus | null;
 }
 
 export const ReviewQueue: React.FC<ReviewQueueProps> = ({
@@ -28,11 +30,15 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
   onSelectPuzzle,
   onOpenSync,
   username,
+  syncStatus,
 }) => {
   const dueCount = stats?.due_today ?? duePuzzles.length;
   const totalCount = stats?.total_puzzles ?? 0;
   const masteredCount = stats?.mastered_puzzles ?? 0;
   const retention = stats?.retention_rate ? stats.retention_rate.toFixed(0) : '100';
+
+  const isBackgroundActive =
+    syncStatus && (syncStatus.state === 'fetching_games' || syncStatus.state === 'analyzing');
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
@@ -46,10 +52,19 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
                 Spaced Repetition Active
               </span>
               <span className="text-slate-600 hidden sm:inline">•</span>
-              <span className="flex items-center gap-1.5 text-emerald-400/90 font-medium lowercase first-letter:uppercase">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                Auto-buffer active
-              </span>
+              {isBackgroundActive ? (
+                <span className="flex items-center gap-1.5 text-emerald-300 font-semibold lowercase first-letter:uppercase animate-pulse">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                  {syncStatus.state === 'fetching_games'
+                    ? 'Fetching recent games...'
+                    : `Analyzing games in background (${syncStatus.processed_games}/${syncStatus.total_games})`}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-emerald-400/90 font-medium lowercase first-letter:uppercase">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  Auto-buffer active
+                </span>
+              )}
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
               Welcome back, <span className="text-emerald-400">{username}</span>
@@ -57,6 +72,8 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
             <p className="text-slate-400 mt-2 text-sm sm:text-base max-w-xl">
               {dueCount > 0
                 ? `You have ${dueCount} personal blunder ${dueCount === 1 ? 'puzzle' : 'puzzles'} due for review today.`
+                : isBackgroundActive
+                ? 'Stockfish is currently evaluating your recent Chess.com games in the background. Your custom blunder puzzles will appear here automatically in a moment.'
                 : totalCount > 0
                 ? 'All caught up on reviews for today! You can practice ahead or import new games.'
                 : 'No puzzles found yet. Connect your Chess.com account to extract blunders and tactical opportunities!'}
@@ -80,6 +97,11 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({
                 <RotateCcw className="w-4 h-4" />
                 Practice Ahead
               </button>
+            ) : isBackgroundActive ? (
+              <div className="flex-1 md:flex-none flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-slate-300 font-semibold text-sm">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <span>Analyzing in background...</span>
+              </div>
             ) : (
               <button
                 onClick={onOpenSync}

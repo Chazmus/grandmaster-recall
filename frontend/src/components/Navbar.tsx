@@ -6,8 +6,10 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
+  Loader2,
 } from 'lucide-react';
 import { sounds } from '../utils/sound';
+import { SyncStatus } from '../types';
 
 interface NavbarProps {
   currentTab: 'review' | 'all' | 'analytics' | 'solver';
@@ -15,6 +17,7 @@ interface NavbarProps {
   onOpenSync: () => void;
   username: string;
   onSwitchUser: (username: string) => void;
+  syncStatus?: SyncStatus | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -23,10 +26,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSync,
   username,
   onSwitchUser,
+  syncStatus,
 }) => {
   const [isMuted, setIsMuted] = useState(sounds.isMuted());
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [userInput, setUserInput] = useState('');
+
+  const isBackgroundActive =
+    syncStatus && (syncStatus.state === 'fetching_games' || syncStatus.state === 'analyzing');
 
   const toggleSound = () => {
     const muted = !sounds.toggleMute();
@@ -104,6 +111,26 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Actions */}
         <div className="flex items-center gap-3">
+          {/* Background Analysis Indicator */}
+          {isBackgroundActive && (
+            <div
+              title={
+                syncStatus.state === 'fetching_games'
+                  ? 'Fetching recent games from Chess.com in background...'
+                  : `Stockfish is analyzing games in background (${syncStatus.processed_games}/${syncStatus.total_games})`
+              }
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-700/80 text-emerald-300 text-xs font-semibold shadow-sm animate-pulse"
+            >
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 shrink-0" />
+              <span className="hidden sm:inline">
+                {syncStatus.state === 'fetching_games'
+                  ? 'Fetching games...'
+                  : `Analyzing games (${syncStatus.processed_games}/${syncStatus.total_games})`}
+              </span>
+              <span className="sm:hidden">Analyzing</span>
+            </div>
+          )}
+
           {/* Sound Toggle */}
           <button
             onClick={toggleSound}

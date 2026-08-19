@@ -58,7 +58,7 @@ export const GameSyncModal: React.FC<GameSyncModalProps> = ({
         time_classes: selectedTimeClasses,
         max_games: 5,
         months_back: 2,
-        engine_depth: 18,
+        engine_depth: 16,
       });
 
       setSyncStatus(status);
@@ -227,7 +227,7 @@ export const GameSyncModal: React.FC<GameSyncModalProps> = ({
                 <span>Automatic Background Buffer Active</span>
               </div>
               <p className="text-[11px] leading-relaxed text-slate-400">
-                The server automatically maintains 10–16 fresh blunder puzzles at <strong>Master Depth (18)</strong> in the background without pegging your CPU.
+                The server automatically maintains 10–16 fresh blunder puzzles at <strong>Depth 16</strong> in the background without pegging your CPU.
               </p>
             </div>
 

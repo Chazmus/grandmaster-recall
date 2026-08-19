@@ -5,14 +5,14 @@ use tracing::{debug, error, info, warn};
 
 use crate::analyzer::GameAnalyzer;
 use crate::db;
-use crate::models::User;
+use crate::models::{SyncStatus, User};
 use crate::routes::sync::AppState;
 
 pub const LOW_WATERMARK: i64 = 8;
 pub const HIGH_WATERMARK: i64 = 16;
 pub const DAEMON_INTERVAL_SECS: u64 = 15 * 60; // 15 minutes
 pub const THROTTLE_SLEEP_MS: u64 = 100; // 100ms cooldown between move evaluations to keep CPU cool
-pub const BACKGROUND_EVAL_DEPTH: u32 = 18; // Master-level high depth analysis for deep tactical accuracy
+pub const BACKGROUND_EVAL_DEPTH: u32 = 16; // High depth analysis for strong tactical accuracy on Pi 5
 
 pub async fn run_background_puzzle_daemon(state: AppState) {
     info!(
@@ -51,7 +51,7 @@ async fn replenish_all_buffers(state: &AppState) -> Result<()> {
     Ok(())
 }
 
-pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<i64> {
+pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<usize> {
     let lower = user.username.to_lowercase();
 
     // 1. Check if user is currently running a manual sync
@@ -83,6 +83,23 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<i64>
         user.username, due_count, total_count
     );
 
+    // Record that we are fetching games
+    {
+        let mut lock = state.sync_states.lock().await;
+        lock.insert(
+            lower.clone(),
+            SyncStatus {
+                username: user.username.clone(),
+                state: "fetching_games".to_string(),
+                total_games: 0,
+                processed_games: 0,
+                puzzles_found: 0,
+                current_game: None,
+                error: None,
+            },
+        );
+    }
+
     // 3. Fetch small batch of recent games (1-3 games)
     let recent_games = match state
         .chess_com
@@ -92,35 +109,67 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<i64>
         Ok(g) => g,
         Err(e) => {
             warn!("Background daemon: Failed to fetch recent games for {}: {:?}", user.username, e);
+            let mut lock = state.sync_states.lock().await;
+            if let Some(st) = lock.get_mut(&lower) {
+                st.state = "idle".to_string();
+                st.error = Some(e.to_string());
+            }
             return Ok(0);
         }
     };
 
     if recent_games.is_empty() {
+        let mut lock = state.sync_states.lock().await;
+        if let Some(st) = lock.get_mut(&lower) {
+            st.state = "idle".to_string();
+        }
         return Ok(0);
+    }
+
+    let total_games = recent_games.len();
+    {
+        let mut lock = state.sync_states.lock().await;
+        if let Some(st) = lock.get_mut(&lower) {
+            st.state = "analyzing".to_string();
+            st.total_games = total_games;
+        }
     }
 
     let analyzer = GameAnalyzer::new(state.engine.clone());
     let mut puzzles_created = 0;
     let mut current_due = due_count;
 
-    for game in recent_games {
+    for (idx, game) in recent_games.iter().enumerate() {
         let pgn = match &game.pgn {
             Some(p) => p,
             None => continue,
         };
 
         let game_url = &game.url;
-        let already_exists = db::game_exists(&state.db, game_url).await.unwrap_or(false);
-        if already_exists {
-            continue;
-        }
-
         let white_player = &game.white.username;
         let black_player = &game.black.username;
         let played_at = Utc.timestamp_opt(game.end_time, 0).single().unwrap_or_else(Utc::now);
         let user_color = if white_player.to_lowercase() == lower { "white" } else { "black" };
         let result = if user_color == "white" { &game.white.result } else { &game.black.result };
+
+        // Update progress
+        {
+            let mut lock = state.sync_states.lock().await;
+            if let Some(st) = lock.get_mut(&lower) {
+                st.processed_games = idx + 1;
+                st.current_game = Some(format!(
+                    "vs {} ({})",
+                    if user_color == "white" { black_player } else { white_player },
+                    game.time_class
+                ));
+                st.puzzles_found = puzzles_created;
+            }
+        }
+
+        let already_exists = db::game_exists(&state.db, game_url).await.unwrap_or(false);
+        if already_exists {
+            continue;
+        }
 
         // Insert game into DB
         let game_id = match db::insert_game(
@@ -144,7 +193,7 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<i64>
             }
         };
 
-        // Run throttled analysis (depth 12, 60ms inter-move delay)
+        // Run throttled analysis (depth 16, 100ms inter-move delay)
         let detected = match analyzer
             .analyze_game_blunders_throttled(
                 pgn,
@@ -193,6 +242,10 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<i64>
             {
                 puzzles_created += 1;
                 current_due += 1;
+                let mut lock = state.sync_states.lock().await;
+                if let Some(st) = lock.get_mut(&lower) {
+                    st.puzzles_found = puzzles_created;
+                }
             }
         }
 
@@ -203,6 +256,17 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<i64>
     }
 
     let _ = db::update_user_last_synced(&state.db, user.id).await;
+
+    // Mark completion
+    {
+        let mut lock = state.sync_states.lock().await;
+        if let Some(st) = lock.get_mut(&lower) {
+            st.state = "completed".to_string();
+            st.processed_games = total_games;
+            st.puzzles_found = puzzles_created;
+            st.current_game = None;
+        }
+    }
 
     if puzzles_created > 0 {
         info!(

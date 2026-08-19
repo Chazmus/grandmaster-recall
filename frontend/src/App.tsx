@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { ReviewQueue } from './components/ReviewQueue';
 import { PuzzleSolver } from './components/PuzzleSolver';
 import { PuzzleList } from './components/PuzzleList';
 import { StatsDashboard } from './components/StatsDashboard';
 import { GameSyncModal } from './components/GameSyncModal';
-import { PuzzleWithReview, StatsSummary, User } from './types';
+import { PuzzleWithReview, StatsSummary, SyncStatus, User } from './types';
 import { api } from './api/client';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 
@@ -17,6 +17,7 @@ export function App() {
 
   const [activeTab, setActiveTab] = useState<'review' | 'all' | 'analytics' | 'solver'>('review');
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
   // Puzzle state
   const [duePuzzles, setDuePuzzles] = useState<PuzzleWithReview[]>([]);
@@ -28,6 +29,25 @@ export function App() {
   // Stats state
   const [stats, setStats] = useState<StatsSummary | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  const lastPuzzlesCountRef = useRef<number>(0);
+
+  const refreshUserDataQuietly = useCallback(async (userId: number) => {
+    try {
+      const [due, all, s] = await Promise.all([
+        api.getReviewQueue(userId, 30),
+        api.getAllPuzzles(userId, 60, 0, severityFilter || undefined),
+        api.getStats(userId),
+      ]);
+
+      setDuePuzzles(due);
+      setAllPuzzles(all);
+      setStats(s);
+      lastPuzzlesCountRef.current = s.total_puzzles;
+    } catch (err) {
+      console.error('Failed to quietly refresh user data:', err);
+    }
+  }, [severityFilter]);
 
   // Initialize or fetch user
   useEffect(() => {
@@ -41,19 +61,19 @@ export function App() {
       const u = await api.getOrCreateUser(uname);
       setUser(u);
 
-      const [due, all, s] = await Promise.all([
+      const [due, all, s, status] = await Promise.all([
         api.getReviewQueue(u.id, 30),
         api.getAllPuzzles(u.id, 60, 0, severityFilter || undefined),
         api.getStats(u.id),
+        api.getSyncStatus(uname).catch(() => null),
       ]);
 
       setDuePuzzles(due);
       setAllPuzzles(all);
       setStats(s);
-
-      // If no puzzles exist yet, suggest opening the sync modal
-      if (s.total_puzzles === 0) {
-        setIsSyncModalOpen(true);
+      lastPuzzlesCountRef.current = s.total_puzzles;
+      if (status) {
+        setSyncStatus(status);
       }
     } catch (err) {
       console.error('Failed to load user data:', err);
@@ -61,6 +81,45 @@ export function App() {
       setIsLoading(false);
     }
   };
+
+  // Poll background daemon progress & quietly refresh when new puzzles arrive
+  useEffect(() => {
+    let pollTimer: any = null;
+    let pollCount = 0;
+    const maxPolls = 30; // Poll for up to 60s
+
+    const poll = async () => {
+      try {
+        const current = await api.getSyncStatus(username);
+        setSyncStatus(current);
+
+        const isActive = current.state === 'fetching_games' || current.state === 'analyzing';
+
+        if (isActive) {
+          if (user && current.puzzles_found > lastPuzzlesCountRef.current) {
+            refreshUserDataQuietly(user.id);
+          }
+        } else {
+          pollCount++;
+          if (current.state === 'completed' && user) {
+            refreshUserDataQuietly(user.id);
+          }
+          if (pollCount >= maxPolls && !isActive) {
+            if (pollTimer) clearInterval(pollTimer);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    poll();
+    pollTimer = setInterval(poll, 2000);
+
+    return () => {
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, [username, user?.id, refreshUserDataQuietly]);
 
   const handleFilterChange = async (severity: string | null) => {
     setSeverityFilter(severity);
@@ -130,6 +189,7 @@ export function App() {
         onOpenSync={() => setIsSyncModalOpen(true)}
         username={username}
         onSwitchUser={handleSwitchUser}
+        syncStatus={syncStatus}
       />
 
       <main className="flex-1 pb-16">
@@ -148,6 +208,7 @@ export function App() {
                 onSelectPuzzle={handleSelectPuzzle}
                 onOpenSync={() => setIsSyncModalOpen(true)}
                 username={username}
+                syncStatus={syncStatus}
               />
             )}
 
