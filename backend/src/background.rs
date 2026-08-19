@@ -100,10 +100,15 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<usiz
         );
     }
 
-    // 3. Fetch small batch of recent games (1-3 games)
+    // 3. Fetch recent games archive (up to 30 games across 3 months)
     let recent_games = match state
         .chess_com
-        .fetch_recent_games(&user.username, &["rapid".to_string(), "blitz".to_string()], 1, 3)
+        .fetch_recent_games(
+            &user.username,
+            &["rapid".to_string(), "blitz".to_string(), "bullet".to_string(), "daily".to_string()],
+            3,
+            30,
+        )
         .await
     {
         Ok(g) => g,
@@ -126,20 +131,54 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<usiz
         return Ok(0);
     }
 
-    let total_games = recent_games.len();
+    // Filter to unanalyzed games
+    let mut unanalyzed_games = Vec::new();
+    for game in recent_games {
+        if game.pgn.is_some() {
+            let already_exists = db::game_exists(&state.db, &game.url).await.unwrap_or(false);
+            if !already_exists {
+                unanalyzed_games.push(game);
+            }
+        }
+    }
+
+    if unanalyzed_games.is_empty() {
+        debug!(
+            "Background daemon: All recent archive games for {} have already been analyzed.",
+            user.username
+        );
+        let mut lock = state.sync_states.lock().await;
+        if let Some(st) = lock.get_mut(&lower) {
+            st.state = "idle".to_string();
+            st.total_games = 0;
+            st.processed_games = 0;
+        }
+        return Ok(0);
+    }
+
+    let total_unanalyzed = unanalyzed_games.len();
+    info!(
+        "Background daemon: Found {} unanalyzed games for user {}. Starting analysis...",
+        total_unanalyzed, user.username
+    );
+
     {
         let mut lock = state.sync_states.lock().await;
         if let Some(st) = lock.get_mut(&lower) {
             st.state = "analyzing".to_string();
-            st.total_games = total_games;
+            st.total_games = total_unanalyzed;
+            st.processed_games = 0;
+            st.puzzles_found = 0;
         }
     }
 
     let analyzer = GameAnalyzer::new(state.engine.clone());
     let mut puzzles_created = 0;
     let mut current_due = due_count;
+    let mut games_processed = 0;
+    const MAX_GAMES_PER_BATCH: usize = 6; // Analyze up to 6 new games per daemon run
 
-    for (idx, game) in recent_games.iter().enumerate() {
+    for (idx, game) in unanalyzed_games.iter().enumerate() {
         let pgn = match &game.pgn {
             Some(p) => p,
             None => continue,
@@ -166,11 +205,6 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<usiz
             }
         }
 
-        let already_exists = db::game_exists(&state.db, game_url).await.unwrap_or(false);
-        if already_exists {
-            continue;
-        }
-
         // Insert game into DB
         let game_id = match db::insert_game(
             &state.db,
@@ -192,6 +226,8 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<usiz
                 continue;
             }
         };
+
+        games_processed += 1;
 
         // Run throttled analysis (depth 16, 100ms inter-move delay)
         let detected = match analyzer
@@ -249,8 +285,8 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<usiz
             }
         }
 
-        // If we have refilled the queue up to the high watermark, stop processing further games
-        if current_due >= HIGH_WATERMARK {
+        // If we have refilled the queue up to the high watermark or reached batch limit, stop processing
+        if current_due >= HIGH_WATERMARK || games_processed >= MAX_GAMES_PER_BATCH {
             break;
         }
     }
@@ -262,7 +298,7 @@ pub async fn replenish_user_buffer(state: &AppState, user: &User) -> Result<usiz
         let mut lock = state.sync_states.lock().await;
         if let Some(st) = lock.get_mut(&lower) {
             st.state = "completed".to_string();
-            st.processed_games = total_games;
+            st.processed_games = games_processed;
             st.puzzles_found = puzzles_created;
             st.current_game = None;
         }
