@@ -60,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
         PathBuf::from("/home/cbailey/grandmaster-recall/engine/stockfish/stockfish-linux-x86-64-universal"),
         PathBuf::from("/usr/bin/stockfish"),
         PathBuf::from("/usr/local/bin/stockfish"),
+        PathBuf::from("/opt/homebrew/bin/stockfish"),
         PathBuf::from("/home/cbailey/workspace/chess-trainer/engine/stockfish/stockfish-linux-x86-64-universal"),
     ]);
 
