@@ -70,11 +70,14 @@ pub async fn validate_move(
             _ => None,
         };
 
+        let tags = GameAnalyzer::detect_tactical_tags(&pos, &move_parsed, &expected_best, 15, "best");
+        let explanation = format!("Brilliant! {}", GameAnalyzer::generate_explanation(&tags, None));
+
         return Ok(Json(ValidateMoveResponse {
             is_valid: true,
             is_best: true,
             eval_diff_cp: 0,
-            explanation: "Brilliant! Best move.".to_string(),
+            explanation,
             opponent_reply_uci: opponent_reply,
             best_move_uci: Some(expected_best),
             continuation_uci: None,
@@ -151,10 +154,11 @@ pub async fn validate_move(
     let continuation = eval_before_res.lines.first().map(|l| l.pv.clone());
 
     let explanation = if is_valid {
+        let alt_tags = GameAnalyzer::detect_tactical_tags(&pos, &move_parsed, &clean_move, 15, "alternative");
         if eval_diff <= 15 {
-            "Excellent move! Equally strong alternative.".to_string()
+            format!("Excellent move! {}", GameAnalyzer::generate_explanation(&alt_tags, None))
         } else {
-            format!("Good move! (Stockfish preferred other line, but this retains a +{:.1} advantage)", (eval_after_pov as f64 / 100.0).abs())
+            format!("Good move! (Maintains +{:.1} advantage. {})", (eval_after_pov as f64 / 100.0).abs(), GameAnalyzer::generate_explanation(&alt_tags, None))
         }
     } else {
         "Not quite. This move concedes the advantage. Try again!".to_string()
